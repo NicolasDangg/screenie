@@ -17,6 +17,7 @@ struct SettingsView: View {
                 Text(settings.savedMessage)
                     .foregroundStyle(.secondary)
             }
+            PermissionSettingsView()
             Text("Your key is stored in macOS Keychain. Screenshots and OCR text are transient request context and are never saved. Prompt and response text is stored locally in Application Support for History.")
                 .foregroundStyle(.secondary)
         }

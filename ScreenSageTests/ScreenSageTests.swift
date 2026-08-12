@@ -2,6 +2,16 @@ import XCTest
 @testable import ScreenSage
 
 final class ScreenSageTests: XCTestCase {
+    func testPermissionSettingsMetadata() {
+        XCTAssertEqual(AppPermission.allCases, [.screenRecording, .accessibility, .inputMonitoring])
+        XCTAssertEqual(AppPermission.screenRecording.requirement, "Required")
+        XCTAssertEqual(AppPermission.accessibility.requirement, "Optional")
+        XCTAssertEqual(AppPermission.inputMonitoring.requirement, "Optional")
+        XCTAssertTrue(AppPermission.screenRecording.settingsURL.absoluteString.contains("Privacy_ScreenCapture"))
+        XCTAssertTrue(AppPermission.accessibility.settingsURL.absoluteString.contains("Privacy_Accessibility"))
+        XCTAssertTrue(AppPermission.inputMonitoring.settingsURL.absoluteString.contains("Privacy_ListenEvent"))
+    }
+
     @MainActor
     func testDefaultProviderConfiguration() {
         XCTAssertEqual(AppSettings.defaultProvider, .openRouter)
