@@ -28,15 +28,17 @@ struct OverlayView: View {
                 Button("Send", systemImage: "arrow.up", action: model.submit)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: 10))
                     .controlSize(.large)
+                    .frame(height: 34)
                     .disabled(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20)
-        .frame(width: 560, height: 390)
+        .frame(width: OverlayLayout.width, height: OverlayLayout.height)
         .background {
             RoundedRectangle(cornerRadius: 26)
-                .fill(Color(red: 0.055, green: 0.06, blue: 0.075).opacity(0.96))
+                .fill(Color(red: 0.055, green: 0.06, blue: 0.075).opacity(0.88))
         }
         .glassEffect(.regular.tint(.black.opacity(0.22)), in: .rect(cornerRadius: 26))
         .preferredColorScheme(.dark)
@@ -49,4 +51,3 @@ struct OverlayView: View {
     OverlayView(model: AppModel(settings: AppSettings()), close: {})
         .padding(40)
 }
-

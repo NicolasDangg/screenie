@@ -2,6 +2,17 @@ import XCTest
 @testable import ScreenSage
 
 final class ScreenSageTests: XCTestCase {
+    @MainActor
+    func testOverlayPanelTogglesPresentedState() {
+        let controller = OverlayPanelController(model: AppModel(settings: AppSettings()))
+
+        XCTAssertFalse(controller.isPresented)
+        controller.toggle()
+        XCTAssertTrue(controller.isPresented)
+        controller.toggle()
+        XCTAssertFalse(controller.isPresented)
+    }
+
     func testSuggestionsHaveConcretePrompts() {
         XCTAssertEqual(PromptSuggestion.explain.prompt, "Explain this question")
         XCTAssertEqual(PromptSuggestion.summarize.prompt, "Summarize what is on my screen")

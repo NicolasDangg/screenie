@@ -12,7 +12,7 @@ final class AppRuntime {
     private init() {}
 
     func start() {
-        hotKey = GlobalHotKey { [weak self] in self?.showOverlay() }
+        hotKey = GlobalHotKey { [weak self] in self?.toggleOverlay() }
         showOverlay()
     }
 
@@ -20,5 +20,13 @@ final class AppRuntime {
         model.prepareForPresentation()
         panelController.show()
     }
-}
 
+    func toggleOverlay() {
+        if panelController.isPresented {
+            panelController.hide()
+        } else {
+            model.prepareForPresentation()
+            panelController.show()
+        }
+    }
+}

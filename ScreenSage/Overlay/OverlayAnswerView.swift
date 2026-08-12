@@ -37,7 +37,6 @@ struct OverlayAnswerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(16)
-        .background(.white.opacity(0.045), in: .rect(cornerRadius: 16))
+        .glassEffect(.regular.tint(.white.opacity(0.04)), in: .rect(cornerRadius: 16))
     }
 }
-

@@ -11,10 +11,12 @@ struct SuggestionBarView: View {
                         model.apply(suggestion)
                     }
                     .buttonStyle(.glass)
+                    .buttonBorderShape(.roundedRectangle(radius: 8))
                     .controlSize(.small)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(height: OverlayLayout.compactButtonHeight)
                 }
             }
         }
     }
 }
-
