@@ -14,11 +14,17 @@ final class AppModel {
     let settings: AppSettings
     private let history: ChatHistoryStore
     private let providerClient = ProviderClient()
+    private let mockResponse: String?
     private var requestTask: Task<Void, Never>?
 
-    init(settings: AppSettings, history: ChatHistoryStore = ChatHistoryStore()) {
+    init(
+        settings: AppSettings,
+        history: ChatHistoryStore = ChatHistoryStore(),
+        mockResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_RESPONSE"]
+    ) {
         self.settings = settings
         self.history = history
+        self.mockResponse = mockResponse
     }
 
     var isExpanded: Bool {
@@ -47,6 +53,14 @@ final class AppModel {
     func submit() {
         let submittedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !submittedPrompt.isEmpty, !isWorking else { return }
+        if let mockResponse {
+            prompt = ""
+            errorMessage = ""
+            conversation.messages.append(ChatMessage(role: .user, text: submittedPrompt))
+            conversation.messages.append(ChatMessage(role: .assistant, text: mockResponse))
+            conversation.updatedAt = .now
+            return
+        }
         guard !settings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             errorMessage = "Add an API key in Settings before asking about your screen."
             return

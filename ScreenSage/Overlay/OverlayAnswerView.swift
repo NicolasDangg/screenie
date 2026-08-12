@@ -10,22 +10,22 @@ struct OverlayAnswerView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 ForEach(messages) { message in
-                    Text(message.text)
+                    renderedText(message.text)
                         .textSelection(.enabled)
-                        .frame(
-                            maxWidth: .infinity,
-                            alignment: message.role == .user ? .trailing : .leading
-                        )
                         .padding(.horizontal, message.role == .user ? 10 : 0)
                         .padding(.vertical, message.role == .user ? 7 : 0)
                         .background(
                             message.role == .user ? Color.white.opacity(0.09) : .clear,
                             in: .rect(cornerRadius: 12)
                         )
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: message.role == .user ? .trailing : .leading
+                        )
                 }
 
                 if !streamingResponse.isEmpty {
-                    Text(streamingResponse)
+                    renderedText(streamingResponse)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if isWorking {
@@ -43,5 +43,12 @@ struct OverlayAnswerView: View {
         }
         .defaultScrollAnchor(.bottom)
         .scrollIndicators(.hidden)
+    }
+
+    private func renderedText(_ text: String) -> Text {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        return Text((try? AttributedString(markdown: text, options: options)) ?? AttributedString(text))
     }
 }

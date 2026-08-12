@@ -113,6 +113,25 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(model.errorMessage, "")
     }
 
+    @MainActor
+    func testMockResponseBypassesProviderAndScreenCapture() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let model = AppModel(
+            settings: AppSettings(defaults: defaults),
+            mockResponse: "**Answer:** The closure captures `count`."
+        )
+        model.prompt = "Explain this code"
+
+        model.submit()
+
+        XCTAssertEqual(model.conversation.messages.count, 2)
+        XCTAssertEqual(model.conversation.messages.first?.role.rawValue, "user")
+        XCTAssertEqual(model.conversation.messages.last?.role.rawValue, "assistant")
+        XCTAssertEqual(model.conversation.messages.last?.text, "**Answer:** The closure captures `count`.")
+        XCTAssertFalse(model.isWorking)
+        XCTAssertEqual(model.errorMessage, "")
+    }
+
     func testOpenAIPayloadDisablesStorageAndIncludesBothContexts() throws {
         let messages = [
             ChatMessage(role: .user, text: "What does this function do?"),
