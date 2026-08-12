@@ -36,7 +36,7 @@ struct OverlayView: View {
                     .opacity(model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
                     .disabled(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(.horizontal, 8.1)
+            .padding(.horizontal, 14.1)
             .frame(height: OverlayLayout.collapsedHeight)
         }
         .frame(
