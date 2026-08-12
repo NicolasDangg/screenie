@@ -5,9 +5,9 @@ struct ProviderClient: Sendable {
         provider: AIProvider,
         model: String,
         apiKey: String,
-        prompt: String,
-        ocrText: String,
-        imageData: Data
+        messages: [ChatMessage],
+        ocrText: String = "",
+        imageData: Data? = nil
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -19,7 +19,7 @@ struct ProviderClient: Sendable {
                     request.httpBody = try JSONSerialization.data(withJSONObject: ProviderRequestBuilder.requestBody(
                         provider: provider,
                         model: model,
-                        prompt: prompt,
+                        messages: messages,
                         ocrText: ocrText,
                         imageData: imageData
                     ))

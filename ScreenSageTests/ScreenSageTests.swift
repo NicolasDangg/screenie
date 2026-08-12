@@ -41,6 +41,29 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertFalse(controller.isPresented)
     }
 
+    @MainActor
+    func testStartingNewConversationClearsTransientState() {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "history.json")
+        let model = AppModel(settings: AppSettings(), history: ChatHistoryStore(fileURL: fileURL))
+        model.prompt = "Draft"
+        model.conversation = Conversation(
+            title: "Old topic",
+            messages: [ChatMessage(role: .assistant, text: "Old answer")]
+        )
+        model.streamingResponse = "Partial"
+        model.errorMessage = "Error"
+
+        model.startNewConversation()
+
+        XCTAssertEqual(model.prompt, "")
+        XCTAssertEqual(model.conversation.title, "New Chat")
+        XCTAssertTrue(model.conversation.messages.isEmpty)
+        XCTAssertEqual(model.streamingResponse, "")
+        XCTAssertEqual(model.errorMessage, "")
+    }
+
     func testSuggestionsHaveConcretePrompts() {
         XCTAssertEqual(PromptSuggestion.explain.prompt, "Explain this question")
         XCTAssertEqual(PromptSuggestion.summarize.prompt, "Summarize what is on my screen")
@@ -48,10 +71,15 @@ final class ScreenSageTests: XCTestCase {
     }
 
     func testOpenAIPayloadDisablesStorageAndIncludesBothContexts() throws {
+        let messages = [
+            ChatMessage(role: .user, text: "What does this function do?"),
+            ChatMessage(role: .assistant, text: "It parses a response."),
+            ChatMessage(role: .user, text: "Explain the selected line")
+        ]
         let body = ProviderRequestBuilder.requestBody(
             provider: .openAI,
             model: "gpt-4.1-mini",
-            prompt: "Explain this question",
+            messages: messages,
             ocrText: "What is 2 + 2?",
             imageData: Data([1, 2, 3])
         )
@@ -60,10 +88,19 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertTrue(try JSONSerialization.data(withJSONObject: body).count > 0)
         let json = String(data: try JSONSerialization.data(withJSONObject: body), encoding: .utf8)!
         XCTAssertTrue(json.contains("What is 2 + 2?"))
+        XCTAssertTrue(json.contains("It parses a response."))
         let input = body["input"] as? [[String: Any]]
         let content = input?.first?["content"] as? [[String: Any]]
         let imageURL = content?.last?["image_url"] as? String
         XCTAssertTrue(imageURL?.hasPrefix("data:image/jpeg;base64,") == true)
+
+        let titleBody = ProviderRequestBuilder.requestBody(
+            provider: .openAI,
+            model: "gpt-4.1-mini",
+            messages: [ChatMessage(role: .user, text: "Generate a short title")]
+        )
+        let titleJSON = String(data: try JSONSerialization.data(withJSONObject: titleBody), encoding: .utf8)!
+        XCTAssertFalse(titleJSON.contains("data:image"))
     }
 
     func testSSEDecoderReadsProviderDeltas() {

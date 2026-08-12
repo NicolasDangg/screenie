@@ -4,42 +4,46 @@ enum ProviderRequestBuilder {
     static func requestBody(
         provider: AIProvider,
         model: String,
-        prompt: String,
-        ocrText: String,
-        imageData: Data
+        messages: [ChatMessage],
+        ocrText: String = "",
+        imageData: Data? = nil
     ) -> [String: Any] {
-        let text = ocrText.isEmpty
-            ? prompt
-            : "\(prompt)\n\nText recognized locally from the screen:\n\(ocrText)"
-        let imageURL = "data:image/jpeg;base64,\(imageData.base64EncodedString())"
+        var text = messages.map { message in
+            "\(message.role == .user ? "User" : "Assistant"): \(message.text)"
+        }.joined(separator: "\n\n")
+        if !ocrText.isEmpty {
+            text += "\n\nText recognized locally from the current screen:\n\(ocrText)"
+        }
+        let imageURL = imageData.map { "data:image/jpeg;base64,\($0.base64EncodedString())" }
 
         switch provider {
         case .openAI:
+            var content: [[String: Any]] = [["type": "input_text", "text": text]]
+            if let imageURL {
+                content.append(["type": "input_image", "image_url": imageURL, "detail": "auto"])
+            }
             return [
                 "model": model,
                 "store": false,
                 "stream": true,
                 "input": [[
                     "role": "user",
-                    "content": [
-                        ["type": "input_text", "text": text],
-                        ["type": "input_image", "image_url": imageURL, "detail": "auto"]
-                    ]
+                    "content": content
                 ]]
             ]
         case .openRouter:
+            var content: [[String: Any]] = [["type": "text", "text": text]]
+            if let imageURL {
+                content.append(["type": "image_url", "image_url": ["url": imageURL]])
+            }
             return [
                 "model": model,
                 "stream": true,
                 "messages": [[
                     "role": "user",
-                    "content": [
-                        ["type": "text", "text": text],
-                        ["type": "image_url", "image_url": ["url": imageURL]]
-                    ]
+                    "content": content
                 ]]
             ]
         }
     }
 }
-
