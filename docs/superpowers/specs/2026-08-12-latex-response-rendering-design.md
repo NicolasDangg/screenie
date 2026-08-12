@@ -15,11 +15,11 @@ Escaped dollar signs remain ordinary text. Unclosed or invalid math remains visi
 
 ## Rendering
 
-`OverlayAnswerView` delegates response content to a small segmented renderer. Plain segments keep the existing native `AttributedString` Markdown treatment. Math segments use the native macOS view supplied by SwiftMath, wrapped with `NSViewRepresentable`.
+`OverlayAnswerView` keeps the existing native `AttributedString` Markdown treatment for user prompts. Assistant and streaming responses use the native SwiftUI `LaTeX` view supplied by LaTeXSwiftUI, which parses mixed prose, inline Markdown, and math delimiters itself.
 
 Inline equations use text mode and match the surrounding response font. Display equations use display mode, centered with modest vertical spacing. Equations constrain or wrap to the overlay width so they do not expand the floating panel horizontally.
 
-The dependency is bundled into the signed app through Swift Package Manager. Nothing is fetched at runtime, and no WebView or JavaScript process is introduced.
+The dependency and its MathJax renderer are bundled into the signed app through Swift Package Manager. Nothing is fetched at runtime, and no WebView or separate web process is introduced.
 
 ## Streaming and History
 
@@ -31,7 +31,7 @@ Unsupported or malformed LaTeX falls back to its source text. A rendering proble
 
 ## Verification
 
-Automated tests cover all four delimiter forms, escaped dollar signs, mixed Markdown/math, and unmatched delimiters. The packaged Release app is then checked with a removable mock response containing inline and display equations.
+An integration test builds a response containing all four delimiter forms, escaped dollar signs, mixed Markdown/math, and an unmatched delimiter. The packaged Release app is then checked with a removable mock response containing inline and display equations.
 
 ## Out of Scope
 
