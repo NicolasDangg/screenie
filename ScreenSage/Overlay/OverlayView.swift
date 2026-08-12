@@ -20,13 +20,7 @@ struct OverlayView: View {
                 Divider().opacity(0.35)
             }
 
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.blue)
-                    .frame(width: 18, height: 18)
-                    .accessibilityHidden(true)
-
+            HStack(spacing: 6) {
                 TextField("Ask about your screen", text: $model.prompt)
                     .textFieldStyle(.plain)
                     .lineLimit(1)
@@ -36,13 +30,13 @@ struct OverlayView: View {
                 Button("Send", systemImage: "arrow.up", action: model.submit)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 25.2, height: 25.2)
                     .background(.blue, in: .circle)
                     .foregroundStyle(.white)
                     .opacity(model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
                     .disabled(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding(.horizontal, 9)
+            .padding(.horizontal, 8.1)
             .frame(height: OverlayLayout.collapsedHeight)
         }
         .frame(
@@ -50,16 +44,11 @@ struct OverlayView: View {
             height: isExpanded ? OverlayLayout.expandedHeight : OverlayLayout.collapsedHeight
         )
         .background(PanelDragArea())
-        .background {
-            RoundedRectangle(cornerRadius: isExpanded ? 22 : OverlayLayout.collapsedHeight / 2)
-                .fill(Color(red: 0.055, green: 0.06, blue: 0.075).opacity(0.9))
-        }
         .glassEffect(
-            .regular.tint(.black.opacity(0.18)),
-            in: .rect(cornerRadius: isExpanded ? 22 : OverlayLayout.collapsedHeight / 2)
+            .regular,
+            in: .rect(cornerRadius: isExpanded ? 20 : OverlayLayout.collapsedHeight / 2)
         )
-        .clipShape(.rect(cornerRadius: isExpanded ? 22 : OverlayLayout.collapsedHeight / 2))
-        .preferredColorScheme(.dark)
+        .clipShape(.rect(cornerRadius: isExpanded ? 20 : OverlayLayout.collapsedHeight / 2))
         .onExitCommand(perform: close)
         .onChange(of: isExpanded, initial: true) { _, expanded in
             setExpanded(expanded)

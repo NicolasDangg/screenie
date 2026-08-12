@@ -3,9 +3,9 @@ import XCTest
 
 final class ScreenSageTests: XCTestCase {
     func testOverlayUsesAdaptiveBarDimensions() {
-        XCTAssertEqual(OverlayLayout.width, 380)
-        XCTAssertEqual(OverlayLayout.collapsedHeight, 42)
-        XCTAssertEqual(OverlayLayout.expandedHeight, 420)
+        XCTAssertEqual(OverlayLayout.width, 304)
+        XCTAssertEqual(OverlayLayout.collapsedHeight, 37.8)
+        XCTAssertEqual(OverlayLayout.expandedHeight, 378)
     }
 
     @MainActor
