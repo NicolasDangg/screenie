@@ -22,12 +22,14 @@ Keep these product decisions unless the user explicitly changes them:
 - Swift module, Xcode target, project, bundle identifier, and history directory retain the older `ScreenSage` name. Do not rename these casually because it can break signing, permissions, tests, or existing history.
 - Bundle identifier: `local.nicolas.ScreenSage`
 - Deployment target: macOS 26.0
-- Global shortcut: Command–Option–Space
+- Global shortcut: Option–Space
+- The signed app registers itself with `SMAppService.mainApp`, launches at login with only its menu-bar item, and keeps the overlay hidden until invoked.
 - Default provider: OpenRouter
 - Default model: `openai/gpt-5.6-luna`
 - OpenAI API is also supported. ChatGPT subscriptions are not used as API authentication.
 - Overlay dimensions are centralized in `ScreenSage/Overlay/OverlayLayout.swift`.
 - The overlay is a transparent, borderless floating `NSPanel` hosting SwiftUI. It can join all Spaces, appear with full-screen apps, and be dragged by its background.
+- The overlay saves its x/y origin on hide and restores it on later toggles and launches when that origin remains on a connected display.
 - The live glass effect comes from `NSVisualEffectView` in `LiveBackdropView`, with an adaptive SwiftUI border in `OverlayView`.
 - Assistant output uses native `AttributedString` Markdown with `.inlineOnlyPreservingWhitespace`; this preserves paragraphs and bullets while styling inline emphasis and code.
 

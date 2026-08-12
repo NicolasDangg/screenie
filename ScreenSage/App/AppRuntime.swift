@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 @MainActor
 final class AppRuntime {
@@ -12,9 +13,18 @@ final class AppRuntime {
 
     private init() {}
 
+    var isOverlayPresented: Bool { panelController.isPresented }
+
+    nonisolated static func shouldRegisterLoginItem(status: SMAppService.Status) -> Bool {
+        status == .notRegistered || status == .notFound
+    }
+
     func start() {
         hotKey = GlobalHotKey { [weak self] in self?.toggleOverlay() }
-        showOverlay()
+        if Bundle.main.bundleURL.path.hasPrefix("/Applications/"),
+           Self.shouldRegisterLoginItem(status: SMAppService.mainApp.status) {
+            try? SMAppService.mainApp.register()
+        }
     }
 
     func showOverlay() {

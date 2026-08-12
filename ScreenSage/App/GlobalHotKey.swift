@@ -1,6 +1,9 @@
 import Carbon
 
 final class GlobalHotKey: @unchecked Sendable {
+    static let keyCode = UInt32(kVK_Space)
+    static let modifiers = UInt32(optionKey)
+
     private var hotKey: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
     private let action: @Sendable @MainActor () -> Void
@@ -26,8 +29,8 @@ final class GlobalHotKey: @unchecked Sendable {
             &eventHandler
         )
         RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(optionKey | cmdKey),
+            Self.keyCode,
+            Self.modifiers,
             EventHotKeyID(signature: 0x53534745, id: 1),
             GetApplicationEventTarget(),
             0,

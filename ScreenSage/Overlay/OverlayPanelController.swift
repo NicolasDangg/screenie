@@ -3,13 +3,20 @@ import SwiftUI
 
 @MainActor
 final class OverlayPanelController {
+    private enum PositionKeys {
+        static let x = "overlayPosition.x"
+        static let y = "overlayPosition.y"
+    }
+
     private let model: AppModel
     private let panel: KeyablePanel
+    private let defaults: UserDefaults
     private var hasBeenPositioned = false
     private(set) var isPresented = false
 
-    init(model: AppModel) {
+    init(model: AppModel, defaults: UserDefaults = .standard) {
         self.model = model
+        self.defaults = defaults
         let panel = KeyablePanel(
             contentRect: NSRect(
                 x: 0,
@@ -38,6 +45,20 @@ final class OverlayPanelController {
         ))
     }
 
+    static func saveOrigin(_ origin: NSPoint, in defaults: UserDefaults) {
+        defaults.set(origin.x, forKey: PositionKeys.x)
+        defaults.set(origin.y, forKey: PositionKeys.y)
+    }
+
+    static func savedOrigin(in defaults: UserDefaults) -> NSPoint? {
+        guard defaults.object(forKey: PositionKeys.x) != nil,
+              defaults.object(forKey: PositionKeys.y) != nil else { return nil }
+        return NSPoint(
+            x: defaults.double(forKey: PositionKeys.x),
+            y: defaults.double(forKey: PositionKeys.y)
+        )
+    }
+
     func toggle() {
         isPresented ? hide() : show()
     }
@@ -57,12 +78,23 @@ final class OverlayPanelController {
         setExpanded(false, animated: false)
         isPresented = true
         if !hasBeenPositioned {
-            let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main
-            if let visibleFrame = screen?.visibleFrame {
-                panel.setFrameOrigin(NSPoint(
-                    x: visibleFrame.midX - panel.frame.width / 2,
-                    y: visibleFrame.minY + 64
-                ))
+            var savedFrame = panel.frame
+            if let savedOrigin = Self.savedOrigin(in: defaults) {
+                savedFrame.origin = savedOrigin
+                if NSScreen.screens.contains(where: { $0.visibleFrame.intersects(savedFrame) }) {
+                    panel.setFrameOrigin(savedOrigin)
+                    hasBeenPositioned = true
+                }
+            }
+            if !hasBeenPositioned {
+                let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+                    ?? NSScreen.main
+                if let visibleFrame = screen?.visibleFrame {
+                    panel.setFrameOrigin(NSPoint(
+                        x: visibleFrame.midX - panel.frame.width / 2,
+                        y: visibleFrame.minY + 64
+                    ))
+                }
                 hasBeenPositioned = true
             }
         }
@@ -74,6 +106,7 @@ final class OverlayPanelController {
 
     func hide() {
         guard isPresented else { return }
+        Self.saveOrigin(panel.frame.origin, in: defaults)
         model.finishConversation()
         isPresented = false
         animate({ self.panel.animator().alphaValue = 0 }) { [weak self] in

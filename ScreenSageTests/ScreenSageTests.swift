@@ -1,4 +1,6 @@
 import AppKit
+import Carbon
+import ServiceManagement
 import XCTest
 @testable import ScreenSage
 
@@ -55,6 +57,25 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(OverlayLayout.expandedHeight, 378)
     }
 
+    func testGlobalShortcutIsOptionSpace() {
+        XCTAssertEqual(GlobalHotKey.keyCode, UInt32(kVK_Space))
+        XCTAssertEqual(GlobalHotKey.modifiers, UInt32(optionKey))
+    }
+
+    func testAppStaysMenuBarOnly() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool, true)
+    }
+
+    @MainActor
+    func testOverlayPositionRoundTrip() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let origin = NSPoint(x: -420.5, y: 180.25)
+
+        OverlayPanelController.saveOrigin(origin, in: defaults)
+
+        XCTAssertEqual(OverlayPanelController.savedOrigin(in: defaults), origin)
+    }
+
     @MainActor
     func testHistoryRoundTrip() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -92,6 +113,20 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertTrue(controller.isPresented)
         controller.toggle()
         XCTAssertFalse(controller.isPresented)
+    }
+
+    @MainActor
+    func testAppRuntimeStartsWithOverlayHidden() {
+        AppRuntime.shared.start()
+
+        XCTAssertFalse(AppRuntime.shared.isOverlayPresented)
+    }
+
+    func testLoginItemRegistrationHandlesMissingService() {
+        XCTAssertTrue(AppRuntime.shouldRegisterLoginItem(status: .notRegistered))
+        XCTAssertTrue(AppRuntime.shouldRegisterLoginItem(status: .notFound))
+        XCTAssertFalse(AppRuntime.shouldRegisterLoginItem(status: .enabled))
+        XCTAssertFalse(AppRuntime.shouldRegisterLoginItem(status: .requiresApproval))
     }
 
     @MainActor
