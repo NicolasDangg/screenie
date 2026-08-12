@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class AppSettings {
+    static let defaultProvider = AIProvider.openRouter
+
     private enum Keys {
         static let provider = "provider"
         static let model = "model"
@@ -24,7 +26,7 @@ final class AppSettings {
 
     init() {
         let rawProvider = UserDefaults.standard.string(forKey: Keys.provider) ?? ""
-        let selectedProvider = AIProvider(rawValue: rawProvider) ?? .openAI
+        let selectedProvider = AIProvider(rawValue: rawProvider) ?? Self.defaultProvider
         provider = selectedProvider
         model = UserDefaults.standard.string(forKey: Keys.model) ?? selectedProvider.defaultModel
         apiKey = KeychainStore.read(account: selectedProvider.rawValue)
@@ -39,4 +41,3 @@ final class AppSettings {
         }
     }
 }
-

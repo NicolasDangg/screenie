@@ -2,6 +2,12 @@ import XCTest
 @testable import ScreenSage
 
 final class ScreenSageTests: XCTestCase {
+    @MainActor
+    func testDefaultProviderConfiguration() {
+        XCTAssertEqual(AppSettings.defaultProvider, .openRouter)
+        XCTAssertEqual(AIProvider.openRouter.defaultModel, "openai/gpt-5.6-luna")
+    }
+
     func testOverlayUsesAdaptiveBarDimensions() {
         XCTAssertEqual(OverlayLayout.width, 304)
         XCTAssertEqual(OverlayLayout.collapsedHeight, 37.8)

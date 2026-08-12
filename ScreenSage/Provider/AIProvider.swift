@@ -16,7 +16,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
     var defaultModel: String {
         switch self {
         case .openAI: "gpt-4.1-mini"
-        case .openRouter: "openai/gpt-4.1-mini"
+        case .openRouter: "openai/gpt-5.6-luna"
         }
     }
 
@@ -27,4 +27,3 @@ enum AIProvider: String, CaseIterable, Identifiable {
         }
     }
 }
-
