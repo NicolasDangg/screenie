@@ -1,7 +1,17 @@
+import AppKit
 import XCTest
 @testable import ScreenSage
 
 final class ScreenSageTests: XCTestCase {
+    @MainActor
+    func testLiveBackdropUsesActiveBehindWindowBlending() {
+        let backdrop = LiveBackdropView.makeVisualEffectView()
+
+        XCTAssertEqual(backdrop.blendingMode, .behindWindow)
+        XCTAssertEqual(backdrop.material, .hudWindow)
+        XCTAssertEqual(backdrop.state, .active)
+    }
+
     func testPermissionSettingsMetadata() {
         XCTAssertEqual(AppPermission.allCases, [.screenRecording, .accessibility, .inputMonitoring])
         XCTAssertEqual(AppPermission.screenRecording.requirement, "Required")

@@ -44,10 +44,7 @@ struct OverlayView: View {
             height: isExpanded ? OverlayLayout.expandedHeight : OverlayLayout.collapsedHeight
         )
         .background(PanelDragArea())
-        .glassEffect(
-            .regular,
-            in: .rect(cornerRadius: isExpanded ? 20 : OverlayLayout.collapsedHeight / 2)
-        )
+        .background { LiveBackdropView().allowsHitTesting(false) }
         .clipShape(.rect(cornerRadius: isExpanded ? 20 : OverlayLayout.collapsedHeight / 2))
         .onExitCommand(perform: close)
         .onChange(of: isExpanded, initial: true) { _, expanded in
