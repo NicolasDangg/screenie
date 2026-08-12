@@ -6,11 +6,12 @@ struct ScreenSageApp: App {
 
     var body: some Scene {
         MenuBarExtra("Screen Sage", systemImage: "sparkles.rectangle.stack") {
-            Button("Ask Screen", systemImage: "sparkles", action: AppRuntime.shared.showOverlay)
-            SettingsLink { Text("Settings…") }
-            Divider()
-            Button("Quit Screen Sage") { NSApp.terminate(nil) }
+            MenuBarContentView()
         }
+        Window("History", id: "history") {
+            HistoryView(store: AppRuntime.shared.history)
+        }
+        .defaultSize(width: 720, height: 520)
         Settings { SettingsView(settings: AppRuntime.shared.settings) }
     }
 }

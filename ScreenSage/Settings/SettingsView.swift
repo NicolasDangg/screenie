@@ -17,7 +17,7 @@ struct SettingsView: View {
                 Text(settings.savedMessage)
                     .foregroundStyle(.secondary)
             }
-            Text("Your key is stored in macOS Keychain. Screenshots and OCR text are kept in memory and sent only to the provider you select when you submit a prompt.")
+            Text("Your key is stored in macOS Keychain. Screenshots and OCR text are transient request context and are never saved. Prompt and response text is stored locally in Application Support for History.")
                 .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
@@ -25,4 +25,3 @@ struct SettingsView: View {
         .frame(width: 460)
     }
 }
-

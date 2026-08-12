@@ -42,6 +42,15 @@ final class OverlayPanelController {
         isPresented ? hide() : show()
     }
 
+    func startNewChat() {
+        if isPresented {
+            model.finishConversation()
+            setExpanded(false)
+        } else {
+            show()
+        }
+    }
+
     func show() {
         guard !isPresented else { return }
         model.startNewConversation()

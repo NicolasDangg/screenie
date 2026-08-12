@@ -106,14 +106,20 @@ final class AppModel {
                     let firstPrompt = conversation.messages.first(where: { $0.role == .user })?.text ?? submittedPrompt
                     conversation.title = Conversation.cleanedTitle("", fallbackPrompt: firstPrompt)
                     history.upsert(conversation)
-                    try await generateTitle(
-                        firstPrompt: firstPrompt,
-                        firstResponse: response,
-                        conversationID: conversationID,
-                        provider: provider,
-                        model: model,
-                        apiKey: apiKey
-                    )
+                    do {
+                        try await generateTitle(
+                            firstPrompt: firstPrompt,
+                            firstResponse: response,
+                            conversationID: conversationID,
+                            provider: provider,
+                            model: model,
+                            apiKey: apiKey
+                        )
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        // The fallback title is already persisted; title generation is nonessential.
+                    }
                 }
                 history.upsert(conversation)
             } catch is CancellationError {

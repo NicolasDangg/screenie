@@ -5,7 +5,8 @@ final class AppRuntime {
     static let shared = AppRuntime()
 
     let settings = AppSettings()
-    lazy var model = AppModel(settings: settings)
+    let history = ChatHistoryStore()
+    lazy var model = AppModel(settings: settings, history: history)
     private lazy var panelController = OverlayPanelController(model: model)
     private var hotKey: GlobalHotKey?
 
@@ -17,15 +18,13 @@ final class AppRuntime {
     }
 
     func showOverlay() {
-        model.prepareForPresentation()
-        panelController.show()
+        panelController.startNewChat()
     }
 
     func toggleOverlay() {
         if panelController.isPresented {
             panelController.hide()
         } else {
-            model.prepareForPresentation()
             panelController.show()
         }
     }
