@@ -10,7 +10,13 @@ struct OverlayAnswerView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 ForEach(messages) { message in
-                    renderedText(message.text)
+                    Group {
+                        if message.role == .assistant {
+                            AssistantResponseText(text: message.text)
+                        } else {
+                            renderedText(message.text)
+                        }
+                    }
                         .textSelection(.enabled)
                         .padding(.horizontal, message.role == .user ? 10 : 0)
                         .padding(.vertical, message.role == .user ? 7 : 0)
@@ -25,7 +31,7 @@ struct OverlayAnswerView: View {
                 }
 
                 if !streamingResponse.isEmpty {
-                    renderedText(streamingResponse)
+                    AssistantResponseText(text: streamingResponse)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if isWorking {

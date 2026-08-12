@@ -57,6 +57,15 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(OverlayLayout.expandedHeight, 378)
     }
 
+    @MainActor
+    func testAssistantResponseBuildsAllCommonLaTeXDelimiters() {
+        let source = #"Inline $x^2$ and \(y^2\). Display $$\frac{1}{2}$$ and \[E=mc^2\]. Literal \$5; unmatched $source."#
+        let response = AssistantResponseText(text: source)
+
+        XCTAssertEqual(response.text, source)
+        _ = response.body
+    }
+
     func testGlobalShortcutIsOptionSpace() {
         XCTAssertEqual(GlobalHotKey.keyCode, UInt32(kVK_Space))
         XCTAssertEqual(GlobalHotKey.modifiers, UInt32(optionKey))

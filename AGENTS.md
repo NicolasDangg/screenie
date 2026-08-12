@@ -31,7 +31,7 @@ Keep these product decisions unless the user explicitly changes them:
 - The overlay is a transparent, borderless floating `NSPanel` hosting SwiftUI. It can join all Spaces, appear with full-screen apps, and be dragged by its background.
 - The overlay saves its x/y origin on hide and restores it on later toggles and launches when that origin remains on a connected display.
 - The live glass effect comes from `NSVisualEffectView` in `LiveBackdropView`, with an adaptive SwiftUI border in `OverlayView`.
-- Assistant output uses native `AttributedString` Markdown with `.inlineOnlyPreservingWhitespace`; this preserves paragraphs and bullets while styling inline emphasis and code.
+- Assistant output uses bundled `LaTeXSwiftUI` 2.x for local Markdown plus inline/display math rendering; user prompts retain native `AttributedString` Markdown.
 
 ## Request flow
 
