@@ -3,8 +3,8 @@ set -euo pipefail
 
 repo_dir=${0:A:h:h}
 derived_data="$repo_dir/DerivedData"
-product="$derived_data/Build/Products/Release/ScreenSage.app"
-installed_app="/Applications/ScreenSage.app"
+product="$derived_data/Build/Products/Release/screenie.app"
+installed_app="/Applications/screenie.app"
 
 xcodebuild \
     -project "$repo_dir/ScreenSage.xcodeproj" \
@@ -14,8 +14,9 @@ xcodebuild \
     -derivedDataPath "$derived_data" \
     build
 
-codesign --force --sign "Apple Development: nicolasdang57@gmail.com (CR2SL8U7ZY)" "$product"
+pkill -x screenie 2>/dev/null || true
 pkill -x ScreenSage 2>/dev/null || true
 rm -rf "$installed_app"
+rm -rf /Applications/ScreenSage.app
 ditto "$product" "$installed_app"
 open "$installed_app"

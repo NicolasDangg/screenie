@@ -1,4 +1,4 @@
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import CoreGraphics
 import Foundation
 
@@ -35,6 +35,20 @@ enum AppPermission: CaseIterable, Identifiable {
         case .screenRecording: CGPreflightScreenCaptureAccess()
         case .accessibility: AXIsProcessTrusted()
         case .inputMonitoring: CGPreflightListenEventAccess()
+        }
+    }
+
+    @discardableResult
+    func request() -> Bool {
+        switch self {
+        case .screenRecording:
+            CGRequestScreenCaptureAccess()
+        case .accessibility:
+            AXIsProcessTrustedWithOptions([
+                kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
+            ] as CFDictionary)
+        case .inputMonitoring:
+            CGRequestListenEventAccess()
         }
     }
 }

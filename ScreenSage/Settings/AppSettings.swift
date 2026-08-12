@@ -9,35 +9,39 @@ final class AppSettings {
     private enum Keys {
         static let provider = "provider"
         static let model = "model"
+
+        static func apiKey(for provider: AIProvider) -> String {
+            "apiKey.\(provider.rawValue)"
+        }
     }
+
+    private let defaults: UserDefaults
 
     var provider: AIProvider {
         didSet {
-            UserDefaults.standard.set(provider.rawValue, forKey: Keys.provider)
+            defaults.set(provider.rawValue, forKey: Keys.provider)
             model = provider.defaultModel
-            apiKey = KeychainStore.read(account: provider.rawValue)
+            apiKey = defaults.string(forKey: Keys.apiKey(for: provider)) ?? ""
         }
     }
     var model: String {
-        didSet { UserDefaults.standard.set(model, forKey: Keys.model) }
+        didSet { defaults.set(model, forKey: Keys.model) }
     }
     var apiKey: String
     var savedMessage = ""
 
-    init() {
-        let rawProvider = UserDefaults.standard.string(forKey: Keys.provider) ?? ""
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let rawProvider = defaults.string(forKey: Keys.provider) ?? ""
         let selectedProvider = AIProvider(rawValue: rawProvider) ?? Self.defaultProvider
         provider = selectedProvider
-        model = UserDefaults.standard.string(forKey: Keys.model) ?? selectedProvider.defaultModel
-        apiKey = KeychainStore.read(account: selectedProvider.rawValue)
+        model = defaults.string(forKey: Keys.model) ?? selectedProvider.defaultModel
+        apiKey = defaults.string(forKey: Keys.apiKey(for: selectedProvider)) ?? ""
     }
 
     func saveAPIKey() {
-        do {
-            try KeychainStore.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), account: provider.rawValue)
-            savedMessage = apiKey.isEmpty ? "API key removed" : "API key saved in Keychain"
-        } catch {
-            savedMessage = "Could not save API key: \(error.localizedDescription)"
-        }
+        apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        defaults.set(apiKey, forKey: Keys.apiKey(for: provider))
+        savedMessage = apiKey.isEmpty ? "API key removed" : "API key saved locally"
     }
 }

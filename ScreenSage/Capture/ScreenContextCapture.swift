@@ -4,6 +4,11 @@ import ScreenCaptureKit
 
 enum ScreenContextCapture {
     static func capture() async throws -> ScreenContext {
+        guard CGPreflightScreenCaptureAccess() else {
+            throw CGRequestScreenCaptureAccess()
+                ? ScreenCaptureError.restartRequired
+                : ScreenCaptureError.permissionDenied
+        }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let displayID = displayUnderPointerID(),
               let display = content.displays.first(where: { $0.displayID == displayID }) ?? content.displays.first
@@ -36,14 +41,17 @@ enum ScreenContextCapture {
 }
 
 enum ScreenCaptureError: LocalizedError {
+    case permissionDenied
+    case restartRequired
     case noDisplay
     case encodingFailed
 
     var errorDescription: String? {
         switch self {
+        case .permissionDenied: "Allow screen capture in System Settings, then try again."
+        case .restartRequired: "Screen capture was enabled. Restart screenie, then try again."
         case .noDisplay: "No display is available to capture."
         case .encodingFailed: "The screenshot could not be encoded."
         }
     }
 }
-

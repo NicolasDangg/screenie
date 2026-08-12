@@ -12,6 +12,6 @@ struct MenuBarContentView: View {
         }
         SettingsLink { Text("Settings…") }
         Divider()
-        Button("Quit Screen Sage") { NSApp.terminate(nil) }
+        Button("Quit screenie") { NSApp.terminate(nil) }
     }
 }

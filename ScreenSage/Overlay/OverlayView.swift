@@ -46,6 +46,18 @@ struct OverlayView: View {
         .background(PanelDragArea())
         .background { LiveBackdropView().allowsHitTesting(false) }
         .clipShape(.rect(cornerRadius: isExpanded ? 20 : OverlayLayout.collapsedHeight / 2))
+        .overlay {
+            RoundedRectangle(cornerRadius: isExpanded ? 20 : OverlayLayout.collapsedHeight / 2)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(0.55), .primary.opacity(0.12), .white.opacity(0.24)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.9
+                )
+                .allowsHitTesting(false)
+        }
         .onExitCommand(perform: close)
         .onChange(of: isExpanded, initial: true) { _, expanded in
             setExpanded(expanded)

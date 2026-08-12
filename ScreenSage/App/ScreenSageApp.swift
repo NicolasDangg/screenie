@@ -5,7 +5,7 @@ struct ScreenSageApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Screen Sage", systemImage: "sparkles.rectangle.stack") {
+        MenuBarExtra("screenie", systemImage: "sparkles.rectangle.stack") {
             MenuBarContentView()
         }
         Window("History", id: "history") {

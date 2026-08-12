@@ -22,10 +22,27 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertTrue(AppPermission.inputMonitoring.settingsURL.absoluteString.contains("Privacy_ListenEvent"))
     }
 
+    func testAppIdentityAndCaptureUsageDescription() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String, "screenie")
+        XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "NSScreenCaptureUsageDescription"))
+    }
+
     @MainActor
     func testDefaultProviderConfiguration() {
         XCTAssertEqual(AppSettings.defaultProvider, .openRouter)
         XCTAssertEqual(AIProvider.openRouter.defaultModel, "openai/gpt-5.6-luna")
+    }
+
+    @MainActor
+    func testAPIKeyIsStoredInLocalPreferences() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let settings = AppSettings(defaults: defaults)
+        settings.apiKey = "local-secret"
+
+        settings.saveAPIKey()
+
+        XCTAssertEqual(AppSettings(defaults: defaults).apiKey, "local-secret")
+        XCTAssertEqual(settings.savedMessage, "API key saved locally")
     }
 
     func testOverlayUsesAdaptiveBarDimensions() {

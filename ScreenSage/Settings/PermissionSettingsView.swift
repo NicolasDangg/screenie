@@ -21,9 +21,14 @@ struct PermissionSettingsView: View {
                         systemImage: grantedPermissions.contains(permission) ? "checkmark.circle.fill" : "xmark.circle"
                     )
                     .foregroundStyle(grantedPermissions.contains(permission) ? .green : .secondary)
+                    if !grantedPermissions.contains(permission) {
+                        Button("Request Access") { request(permission) }
+                    }
                     Button("Open Settings") { openSettings(for: permission) }
                 }
             }
+            Text("After enabling screen capture, restart screenie. If it isn't listed, use Add in System Settings and choose /Applications/screenie.app.")
+                .foregroundStyle(.secondary)
         }
         .task(refresh)
         .onChange(of: scenePhase) { _, phase in
@@ -37,5 +42,11 @@ struct PermissionSettingsView: View {
 
     private func openSettings(for permission: AppPermission) {
         NSWorkspace.shared.open(permission.settingsURL)
+    }
+
+    private func request(_ permission: AppPermission) {
+        let granted = permission.request()
+        refresh()
+        if !granted { openSettings(for: permission) }
     }
 }
