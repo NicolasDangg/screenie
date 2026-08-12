@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace Screen Sage’s card overlay with a 380 × 42 pt adaptive AI pill that expands upward for conversation, captures one screenshot plus local OCR per prompt, and persists text-only titled chat history.
+**Goal:** Build a 304 × 37.8 pt adaptive AI pill that expands upward for conversation, captures one screenshot plus local OCR per prompt, and persists text-only titled chat history.
 
 **Architecture:** Keep the existing borderless `NSPanel`, global Carbon shortcut, ScreenCaptureKit capture, Vision OCR, and provider streaming path. Add small Codable conversation types and an atomic JSON history store, drive one adaptive SwiftUI root from `AppModel`, and expose History/Settings through native SwiftUI scenes and the menu bar.
 
@@ -144,9 +144,9 @@ git commit -m 'feat: add multi-turn screen conversations'
 
 ```swift
 func testOverlayUsesAdaptiveBarDimensions() {
-    XCTAssertEqual(OverlayLayout.width, 380)
-    XCTAssertEqual(OverlayLayout.collapsedHeight, 42)
-    XCTAssertEqual(OverlayLayout.expandedHeight, 420)
+    XCTAssertEqual(OverlayLayout.width, 304)
+    XCTAssertEqual(OverlayLayout.collapsedHeight, 37.8)
+    XCTAssertEqual(OverlayLayout.expandedHeight, 378)
 }
 ```
 
@@ -156,11 +156,11 @@ Expected: compilation fails because collapsed and expanded heights do not exist.
 
 - [ ] **Step 3: Implement the adaptive root**
 
-Build one clipped rounded surface. In collapsed state render only the 18 pt app mark, plain single-line field, and 28 pt send arrow. When the model is working, has messages, or has an error, render `OverlayAnswerView` above the same pinned composer and use the expanded height. Add `.onExitCommand(perform: close)` and a `PanelDragArea` behind noninteractive padding.
+Build one clipped rounded surface. In collapsed state render only the plain single-line field and compact send arrow. Apply Apple’s native `glassEffect(_:in:)` directly to the final capsule without a custom dark fill. When the model is working, has messages, or has an error, render `OverlayAnswerView` above the same pinned composer and use the expanded height. Add `.onExitCommand(perform: close)` and a `PanelDragArea` behind noninteractive padding.
 
 - [ ] **Step 4: Resize the `NSPanel` upward and remove the square artifact**
 
-Initialize at `380 × 42`. Keep the frame origin fixed while animating only its height to `420`, so content grows above the composer. Set `panel.hasShadow = false`, keep `backgroundColor = .clear`, and clip the entire SwiftUI surface to its rounded shape.
+Initialize at `304 × 37.8`. Keep the frame origin fixed while animating only its height to `378`, so content grows above the composer. Set `panel.hasShadow = false`, keep `backgroundColor = .clear`, and clip the entire SwiftUI surface to its rounded shape.
 
 - [ ] **Step 5: Run tests and build**
 
@@ -226,7 +226,7 @@ Expected: build succeeds and the diff check prints nothing.
 
 - [ ] **Step 3: Run in Xcode with Computer Use**
 
-Verify the actual panel is `380 × 42`, contains no suggestion/header controls, has no square background corners, expands upward after submission, and keeps the composer at the bottom. Verify the shortcut/close paths start a fresh chat and History contains text only.
+Verify the actual panel is `304 × 37.8`, contains no leading icon or suggestion/header controls, has a transparent blurred glass surface without square background corners, expands upward after submission, and keeps the composer at the bottom. Verify the shortcut/close paths start a fresh chat and History contains text only.
 
 - [ ] **Step 4: Leave the verified app running**
 

@@ -6,14 +6,15 @@ Replace the current overlay card with a compact Gemini-inspired input pill that 
 
 ## Interface
 
-- The collapsed overlay is a `380 × 42 pt` borderless floating pill.
-- It contains only an 18 pt Screen Sage mark, a single-line “Ask about your screen” field, and a 28 pt send arrow that is enabled when the prompt is non-empty.
+- The collapsed overlay is a `304 × 37.8 pt` borderless floating pill.
+- It contains only a single-line “Ask about your screen” field and a compact send arrow that is enabled when the prompt is non-empty.
 - There is no header, suggestion bar, plus button, voice button, model picker, shortcut label, or close button.
 - `⌥⌘Space` toggles the overlay. Escape hides it. Showing the overlay focuses the field.
 - The pill is draggable from its unused background and padding.
-- Submitting expands the same panel upward, preserving its width and bottom edge, to a maximum height of `420 pt`.
+- Submitting expands the same panel upward, preserving its width and bottom edge, to a maximum height of `378 pt`.
 - Conversation messages and compact progress/error feedback scroll above the composer. The composer remains pinned to the bottom.
-- The panel uses one clipped native Liquid Glass rounded surface. The transparent `NSPanel` has no rectangular window shadow, preventing square corner artifacts.
+- The panel uses one clipped native Liquid Glass rounded surface with no custom opaque fill. The transparent `NSPanel` has no rectangular window shadow, preventing square corner artifacts.
+- This follows Apple’s `glassEffect(_:in:)` guidance: apply the system glass material to the final custom shape and let it blur the content behind the view.
 
 ## Conversation Flow
 
