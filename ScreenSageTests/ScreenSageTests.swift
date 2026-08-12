@@ -27,6 +27,10 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "NSScreenCaptureUsageDescription"))
     }
 
+    func testAppUsesScreenieAppIcon() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleIconName") as? String, "AppIcon")
+    }
+
     @MainActor
     func testDefaultProviderConfiguration() {
         XCTAssertEqual(AppSettings.defaultProvider, .openRouter)
