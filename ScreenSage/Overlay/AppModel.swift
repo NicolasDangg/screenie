@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import Observation
 
 @MainActor
@@ -21,12 +21,6 @@ final class AppModel {
         self.history = history
     }
 
-    var answer: String {
-        streamingResponse.isEmpty
-            ? conversation.messages.last(where: { $0.role == .assistant })?.text ?? ""
-            : streamingResponse
-    }
-
     var isExpanded: Bool {
         isWorking || !conversation.messages.isEmpty || !errorMessage.isEmpty
     }
@@ -47,10 +41,6 @@ final class AppModel {
             conversation.updatedAt = .now
             history.upsert(conversation)
         }
-        startNewConversation()
-    }
-
-    func prepareForPresentation() {
         startNewConversation()
     }
 
@@ -129,11 +119,6 @@ final class AppModel {
                 errorMessage = error.localizedDescription
             }
         }
-    }
-
-    func openScreenRecordingSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else { return }
-        NSWorkspace.shared.open(url)
     }
 
     private func generateTitle(

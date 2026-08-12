@@ -231,4 +231,3 @@ Verify the actual panel is `380 × 42`, contains no suggestion/header controls, 
 - [ ] **Step 4: Leave the verified app running**
 
 Run `git status --short` and expect a clean worktree on `main`, with Screen Sage visible from the Xcode run.
-
