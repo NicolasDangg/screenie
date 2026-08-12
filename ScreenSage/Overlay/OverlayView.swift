@@ -4,50 +4,76 @@ struct OverlayView: View {
     @Bindable var model: AppModel
     @FocusState private var promptIsFocused: Bool
     let close: () -> Void
+    let setExpanded: (Bool) -> Void
+
+    private var isExpanded: Bool { model.isExpanded }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            OverlayHeaderView(isWorking: model.isWorking, close: close)
-            OverlayAnswerView(
-                answer: model.answer,
-                errorMessage: model.errorMessage,
-                isWorking: model.isWorking,
-                openScreenRecordingSettings: model.openScreenRecordingSettings
-            )
-            SuggestionBarView(model: model)
-            HStack(alignment: .bottom, spacing: 12) {
-                TextField("Ask about your screen", text: $model.prompt, axis: .vertical)
+        VStack(spacing: 0) {
+            if isExpanded {
+                OverlayAnswerView(
+                    messages: model.conversation.messages,
+                    streamingResponse: model.streamingResponse,
+                    errorMessage: model.errorMessage,
+                    isWorking: model.isWorking
+                )
+                Divider().opacity(0.35)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.blue)
+                    .frame(width: 18, height: 18)
+                    .accessibilityHidden(true)
+
+                TextField("Ask about your screen", text: $model.prompt)
                     .textFieldStyle(.plain)
-                    .lineLimit(2...4)
+                    .lineLimit(1)
                     .focused($promptIsFocused)
                     .onSubmit(model.submit)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(.white.opacity(0.07), in: .rect(cornerRadius: 14))
 
                 Button("Send", systemImage: "arrow.up", action: model.submit)
                     .labelStyle(.iconOnly)
-                    .buttonStyle(.glassProminent)
-                    .buttonBorderShape(.roundedRectangle(radius: 10))
-                    .controlSize(.large)
-                    .frame(height: 34)
+                    .buttonStyle(.plain)
+                    .frame(width: 28, height: 28)
+                    .background(.blue, in: .circle)
+                    .foregroundStyle(.white)
+                    .opacity(model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
                     .disabled(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            .padding(.horizontal, 9)
+            .frame(height: OverlayLayout.collapsedHeight)
         }
-        .padding(20)
-        .frame(width: OverlayLayout.width, height: OverlayLayout.height)
+        .frame(
+            width: OverlayLayout.width,
+            height: isExpanded ? OverlayLayout.expandedHeight : OverlayLayout.collapsedHeight
+        )
+        .background(PanelDragArea())
         .background {
-            RoundedRectangle(cornerRadius: 26)
-                .fill(Color(red: 0.055, green: 0.06, blue: 0.075).opacity(0.88))
+            RoundedRectangle(cornerRadius: isExpanded ? 22 : OverlayLayout.collapsedHeight / 2)
+                .fill(Color(red: 0.055, green: 0.06, blue: 0.075).opacity(0.9))
         }
-        .glassEffect(.regular.tint(.black.opacity(0.22)), in: .rect(cornerRadius: 26))
+        .glassEffect(
+            .regular.tint(.black.opacity(0.18)),
+            in: .rect(cornerRadius: isExpanded ? 22 : OverlayLayout.collapsedHeight / 2)
+        )
+        .clipShape(.rect(cornerRadius: isExpanded ? 22 : OverlayLayout.collapsedHeight / 2))
         .preferredColorScheme(.dark)
+        .onExitCommand(perform: close)
+        .onChange(of: isExpanded, initial: true) { _, expanded in
+            setExpanded(expanded)
+        }
         .task { promptIsFocused = true }
         .onChange(of: model.presentationID) { _, _ in promptIsFocused = true }
     }
 }
 
 #Preview {
-    OverlayView(model: AppModel(settings: AppSettings()), close: {})
-        .padding(40)
+    OverlayView(
+        model: AppModel(settings: AppSettings()),
+        close: {},
+        setExpanded: { _ in }
+    )
+    .padding(40)
 }

@@ -2,6 +2,12 @@ import XCTest
 @testable import ScreenSage
 
 final class ScreenSageTests: XCTestCase {
+    func testOverlayUsesAdaptiveBarDimensions() {
+        XCTAssertEqual(OverlayLayout.width, 380)
+        XCTAssertEqual(OverlayLayout.collapsedHeight, 42)
+        XCTAssertEqual(OverlayLayout.expandedHeight, 420)
+    }
+
     @MainActor
     func testHistoryRoundTrip() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -62,12 +68,6 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertTrue(model.conversation.messages.isEmpty)
         XCTAssertEqual(model.streamingResponse, "")
         XCTAssertEqual(model.errorMessage, "")
-    }
-
-    func testSuggestionsHaveConcretePrompts() {
-        XCTAssertEqual(PromptSuggestion.explain.prompt, "Explain this question")
-        XCTAssertEqual(PromptSuggestion.summarize.prompt, "Summarize what is on my screen")
-        XCTAssertEqual(PromptSuggestion.findBug.prompt, "Find the bug in the code on my screen and explain the fix")
     }
 
     func testOpenAIPayloadDisablesStorageAndIncludesBothContexts() throws {

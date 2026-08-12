@@ -1,42 +1,47 @@
 import SwiftUI
 
 struct OverlayAnswerView: View {
-    let answer: String
+    let messages: [ChatMessage]
+    let streamingResponse: String
     let errorMessage: String
     let isWorking: Bool
-    let openScreenRecordingSettings: () -> Void
 
     var body: some View {
-        Group {
-            if !errorMessage.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    HStack {
-                        SettingsLink { Text("Open Settings") }
-                        Button("Screen Recording Settings", action: openScreenRecordingSettings)
-                    }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                ForEach(messages) { message in
+                    Text(message.text)
+                        .textSelection(.enabled)
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: message.role == .user ? .trailing : .leading
+                        )
+                        .padding(.horizontal, message.role == .user ? 10 : 0)
+                        .padding(.vertical, message.role == .user ? 7 : 0)
+                        .background(
+                            message.role == .user ? Color.white.opacity(0.09) : .clear,
+                            in: .rect(cornerRadius: 12)
+                        )
                 }
-            } else if answer.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Ask about what’s on your screen")
-                        .font(.title3)
-                        .bold()
-                    Text("A single screenshot and local Vision OCR are attached only after you press Return.")
-                        .foregroundStyle(.secondary)
-                    if isWorking { ProgressView().controlSize(.small) }
-                }
-            } else {
-                ScrollView {
-                    Text(answer)
+
+                if !streamingResponse.isEmpty {
+                    Text(streamingResponse)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                } else if isWorking {
+                    ProgressView("Reading screen…")
+                        .controlSize(.small)
                 }
-                .scrollIndicators(.hidden)
+
+                if !errorMessage.isEmpty {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.callout)
+                }
             }
+            .padding(14)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(16)
-        .glassEffect(.regular.tint(.white.opacity(0.04)), in: .rect(cornerRadius: 16))
+        .defaultScrollAnchor(.bottom)
+        .scrollIndicators(.hidden)
     }
 }

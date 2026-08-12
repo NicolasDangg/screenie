@@ -54,11 +54,6 @@ final class AppModel {
         startNewConversation()
     }
 
-    func apply(_ suggestion: PromptSuggestion) {
-        prompt = suggestion.prompt
-        presentationID += 1
-    }
-
     func submit() {
         let submittedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !submittedPrompt.isEmpty, !isWorking else { return }

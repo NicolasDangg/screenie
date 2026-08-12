@@ -1,5 +1,5 @@
 enum OverlayLayout {
-    static let width = 560.0
-    static let height = 390.0 * 0.85
-    static let compactButtonHeight = 22.0
+    static let width = 380.0
+    static let collapsedHeight = 42.0
+    static let expandedHeight = 420.0
 }
