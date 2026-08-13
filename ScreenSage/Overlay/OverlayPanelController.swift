@@ -132,7 +132,9 @@ final class OverlayPanelController {
     }
 
     private func setExpanded(_ expanded: Bool, animated: Bool = true) {
-        let height = expanded ? OverlayLayout.expandedHeight : OverlayLayout.collapsedHeight
+        let height = model.presentationMode == .tasks
+            ? OverlayLayout.taskHeight
+            : (expanded ? OverlayLayout.expandedHeight : OverlayLayout.collapsedHeight)
         guard panel.frame.height != height else { return }
         var frame = panel.frame
         frame.size.height = height

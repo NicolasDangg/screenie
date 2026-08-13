@@ -7,6 +7,7 @@ struct TaskListView: View {
     let isParsingTask: Bool
     let isRequestingSchedule: Bool
     let toggleCompletion: (UUID) -> Void
+    let requestDelete: (ScreenieTask) -> Void
 
     var body: some View {
         ScrollView {
@@ -20,7 +21,11 @@ struct TaskListView: View {
                     .frame(minHeight: 210)
                 } else {
                     ForEach(tasks.enumerated(), id: \.element.id) { index, task in
-                        TaskRowView(task: task) { toggleCompletion(task.id) }
+                        TaskRowView(
+                            task: task,
+                            toggleCompletion: { toggleCompletion(task.id) },
+                            delete: { requestDelete(task) }
+                        )
                         if index < tasks.count - 1 {
                             Divider()
                                 .padding(.leading, 42)

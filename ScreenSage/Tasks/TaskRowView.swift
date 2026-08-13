@@ -3,7 +3,11 @@ import SwiftUI
 struct TaskRowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let task: ScreenieTask
+    var isAgenda = false
     let toggleCompletion: () -> Void
+    var delete: (() -> Void)?
+
+    @State private var isHovered = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -31,7 +35,12 @@ struct TaskRowView: View {
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: task.isCompleted)
 
                 if let dueDate = task.dueDate {
-                    Text(dueDate, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+                    Text(
+                        dueDate,
+                        format: isAgenda
+                            ? .dateTime.hour().minute()
+                            : .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()
+                    )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -48,9 +57,25 @@ struct TaskRowView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let delete {
+                Button("Delete task", systemImage: "trash", action: delete)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .opacity(isHovered ? 1 : 0.35)
+                    .help("Delete task")
+            }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, isAgenda ? 6 : 8)
         .contentShape(.rect)
+        .onHover { isHovered = $0 }
+        .contextMenu {
+            if let delete {
+                Button("Delete", systemImage: "trash", role: .destructive, action: delete)
+            }
+        }
     }
 }

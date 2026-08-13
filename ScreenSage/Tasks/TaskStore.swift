@@ -8,16 +8,21 @@ final class TaskStore {
     private(set) var lastError = ""
     private var calendarErrors: [UUID: String] = [:]
     private let fileURL: URL?
+    private let calendarDelete: (@MainActor (ScreenieTask) async throws -> Void)?
     private let calendarSync: (@MainActor (ScreenieTask) async throws -> String?)?
     private var syncTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
         fileURL: URL? = TaskStore.defaultFileURL,
+        calendarDelete: (@MainActor (ScreenieTask) async throws -> Void)? = { task in
+            try await TaskCalendarSync.shared.delete(task)
+        },
         calendarSync: (@MainActor (ScreenieTask) async throws -> String?)? = { task in
             return try await TaskCalendarSync.shared.upsert(task)
         }
     ) {
         self.fileURL = fileURL
+        self.calendarDelete = calendarDelete
         self.calendarSync = calendarSync
         load()
         tasks.filter { $0.dueDate != nil }.forEach { synchronize($0.id) }
@@ -83,6 +88,33 @@ final class TaskStore {
             return
         }
         synchronize(id)
+    }
+
+    func delete(_ id: UUID) {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        let task = tasks.remove(at: index)
+        guard save() else {
+            tasks.insert(task, at: index)
+            return
+        }
+
+        calendarErrors[id] = nil
+        let previousSync = syncTasks[id]
+        previousSync?.cancel()
+        guard let calendarDelete else {
+            syncTasks[id] = nil
+            return
+        }
+        syncTasks[id] = Task { [weak self] in
+            await previousSync?.value
+            guard let self else { return }
+            do {
+                try await calendarDelete(task)
+            } catch {
+                lastError = "Task deleted, but its Apple Calendar event could not be removed: \(error.localizedDescription)"
+            }
+            syncTasks[id] = nil
+        }
     }
 
     private func load() {

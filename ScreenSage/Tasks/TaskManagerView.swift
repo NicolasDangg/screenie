@@ -2,9 +2,9 @@ import SwiftUI
 
 struct TaskManagerView: View {
     @Bindable var model: AppModel
-    @State private var viewMode = TaskViewMode.list
+    @State private var viewMode = TaskViewMode.calendar
     @State private var isAddingTask = false
-    @State private var selectedDate = Date.now
+    @State private var pendingDeletion: ScreenieTask?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,13 +36,17 @@ struct TaskManagerView: View {
                     errorMessage: model.taskError.isEmpty ? model.taskStore.errorMessage : model.taskError,
                     isParsingTask: model.isParsingTask,
                     isRequestingSchedule: model.isRequestingTaskSchedule,
-                    toggleCompletion: model.taskStore.toggleCompletion
+                    toggleCompletion: model.taskStore.toggleCompletion,
+                    requestDelete: requestDelete
                 )
             } else {
                 TaskCalendarView(
-                    selectedDate: $selectedDate,
                     tasks: model.taskStore.sortedTasks,
-                    toggleCompletion: model.taskStore.toggleCompletion
+                    errorMessage: model.taskError.isEmpty ? model.taskStore.errorMessage : model.taskError,
+                    isParsingTask: model.isParsingTask,
+                    isRequestingSchedule: model.isRequestingTaskSchedule,
+                    toggleCompletion: model.taskStore.toggleCompletion,
+                    requestDelete: requestDelete
                 )
             }
 
@@ -50,7 +54,11 @@ struct TaskManagerView: View {
 
             HStack {
                 Button("Add task", systemImage: "plus", action: showAddTask)
-                    .buttonStyle(.plain)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.small)
+                    .help("Add task")
                 Spacer()
                 Button("Schedule hint", systemImage: "wand.and.stars", action: model.requestScheduleHint)
                     .buttonStyle(.plain)
@@ -66,6 +74,22 @@ struct TaskManagerView: View {
                 model.taskError = ""
             }
         }
+        .alert(
+            "Delete task?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            presenting: pendingDeletion
+        ) { task in
+            Button("Delete", role: .destructive) {
+                model.taskStore.delete(task.id)
+                pendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+        } message: { task in
+            Text("If “\(task.title)” was synced, its Apple Calendar event will be removed too.")
+        }
     }
 
     private func toggleViewMode() {
@@ -74,5 +98,9 @@ struct TaskManagerView: View {
 
     private func showAddTask() {
         isAddingTask = true
+    }
+
+    private func requestDelete(_ task: ScreenieTask) {
+        pendingDeletion = task
     }
 }

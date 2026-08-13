@@ -40,6 +40,22 @@ actor TaskCalendarSync {
         return event.eventIdentifier
     }
 
+    func delete(_ task: ScreenieTask) async throws {
+        let descriptor = TaskCalendarEvent(task: task)
+        guard let dueDate = descriptor.startDate else { return }
+        guard try await hasAccess() else {
+            throw NSError(
+                domain: "screenie.calendar",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Calendar access was not granted."]
+            )
+        }
+
+        guard let event = task.calendarEventIdentifier.flatMap(eventStore.event(withIdentifier:))
+                ?? matchingEvent(marker: descriptor.taskMarker, near: dueDate) else { return }
+        try eventStore.remove(event, span: .thisEvent, commit: true)
+    }
+
     private func matchingEvent(marker: String, near date: Date) -> EKEvent? {
         let predicate = eventStore.predicateForEvents(
             withStart: date.addingTimeInterval(-24 * 60 * 60),

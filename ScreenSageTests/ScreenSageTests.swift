@@ -80,6 +80,7 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(OverlayLayout.width, 304)
         XCTAssertEqual(OverlayLayout.collapsedHeight, 37.8)
         XCTAssertEqual(OverlayLayout.expandedHeight, 378)
+        XCTAssertEqual(OverlayLayout.taskHeight, 480)
     }
 
     @MainActor
@@ -334,6 +335,34 @@ final class ScreenSageTests: XCTestCase {
         ))
     }
 
+    func testFoundationModelParserHonorsExplicitTaskDateSuffix() throws {
+        let generated = ScreenieTask(
+            title: "Physics deadline",
+            dueDate: date(2026, 8, 17),
+            notes: "Next Tuesday"
+        )
+
+        let corrected = FoundationModelTaskParser.reconcileDueDate(
+            in: generated,
+            entry: "physics deadline next tue",
+            now: date(2026, 8, 13, 20),
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(corrected.dueDate, date(2026, 8, 18))
+        XCTAssertEqual(corrected.title, generated.title)
+        XCTAssertEqual(corrected.notes, generated.notes)
+        XCTAssertEqual(
+            FoundationModelTaskParser.reconcileDueDate(
+                in: generated,
+                entry: "physics deadline after class",
+                now: date(2026, 8, 13, 20),
+                calendar: utcCalendar
+            ).dueDate,
+            generated.dueDate
+        )
+    }
+
     @MainActor
     func testTaskStoreSortsDueDatesBeforeUndatedTasksAndTogglesCompletion() {
         let store = TaskStore(fileURL: nil, calendarSync: nil)
@@ -382,6 +411,32 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertFalse(json.contains("imageData"))
         XCTAssertFalse(json.contains("ocrText"))
         XCTAssertFalse(json.contains("taskSchedule"))
+    }
+
+    @MainActor
+    func testTaskStorePersistsDeletionAndRemovesCalendarEvent() async {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "tasks.json")
+        let task = ScreenieTask(
+            title: "Accidental task",
+            dueDate: date(2026, 8, 18),
+            calendarEventIdentifier: "event-123"
+        )
+        var deletedTask: ScreenieTask?
+        let store = TaskStore(
+            fileURL: fileURL,
+            calendarDelete: { deletedTask = $0 },
+            calendarSync: nil
+        )
+
+        store.add(task)
+        store.delete(task.id)
+        await waitUntil { deletedTask != nil }
+
+        XCTAssertEqual(deletedTask, task)
+        XCTAssertTrue(store.tasks.isEmpty)
+        XCTAssertTrue(TaskStore(fileURL: fileURL, calendarSync: nil).tasks.isEmpty)
     }
 
     @MainActor
@@ -441,6 +496,26 @@ final class ScreenSageTests: XCTestCase {
     }
 
     @MainActor
+    func testTaskCalendarBuildsLocaleAwareMonthAndWeekRanges() {
+        var calendar = utcCalendar
+        calendar.firstWeekday = 2
+
+        let month = TaskCalendarView.monthDates(
+            containing: date(2026, 8, 13),
+            calendar: calendar
+        )
+        let week = TaskCalendarView.weekDates(
+            containing: date(2026, 8, 13),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(month.count, 42)
+        XCTAssertEqual(month.first, date(2026, 7, 27, 0))
+        XCTAssertEqual(month.last, date(2026, 9, 6, 0))
+        XCTAssertEqual(week, (10...16).map { date(2026, 8, $0, 0) })
+    }
+
+    @MainActor
     func testTaskStoreRollsBackWhenPersistenceFails() {
         let store = TaskStore(
             fileURL: URL(filePath: "/dev/null/tasks.json"),
@@ -460,10 +535,10 @@ final class ScreenSageTests: XCTestCase {
             .appending(path: UUID().uuidString)
             .appending(path: "tasks.json")
         let task = ScreenieTask(title: "Physics", dueDate: date(2026, 8, 18))
-        let store = TaskStore(fileURL: fileURL) { synchronizedTask in
+        let store = TaskStore(fileURL: fileURL, calendarSync: { synchronizedTask in
             XCTAssertEqual(synchronizedTask.id, task.id)
             return "event-123"
-        }
+        })
 
         store.add(task)
         await waitUntil { store.tasks.first?.calendarEventIdentifier == "event-123" }
@@ -479,7 +554,7 @@ final class ScreenSageTests: XCTestCase {
     func testTaskStoreRetainsEachCalendarSyncErrorUntilThatTaskSucceeds() async {
         let failed = ScreenieTask(title: "Fails", dueDate: date(2026, 8, 18))
         let succeeds = ScreenieTask(title: "Succeeds", dueDate: date(2026, 8, 19))
-        let store = TaskStore(fileURL: nil) { task in
+        let store = TaskStore(fileURL: nil, calendarSync: { task in
             guard task.id != failed.id else {
                 throw NSError(
                     domain: "calendar-test",
@@ -488,7 +563,7 @@ final class ScreenSageTests: XCTestCase {
                 )
             }
             return "event-\(task.id)"
-        }
+        })
 
         store.add(failed)
         store.add(succeeds)

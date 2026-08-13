@@ -7,6 +7,11 @@ struct OverlayView: View {
     let setExpanded: (Bool) -> Void
 
     private var isExpanded: Bool { model.isExpanded }
+    private var height: Double {
+        model.presentationMode == .tasks
+            ? OverlayLayout.taskHeight
+            : (isExpanded ? OverlayLayout.expandedHeight : OverlayLayout.collapsedHeight)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,7 +50,7 @@ struct OverlayView: View {
         }
         .frame(
             width: OverlayLayout.width,
-            height: isExpanded ? OverlayLayout.expandedHeight : OverlayLayout.collapsedHeight
+            height: height
         )
         .background(PanelDragArea())
         .background { LiveBackdropView().allowsHitTesting(false) }
@@ -65,6 +70,9 @@ struct OverlayView: View {
         .onExitCommand(perform: close)
         .onChange(of: isExpanded, initial: true) { _, expanded in
             setExpanded(expanded)
+        }
+        .onChange(of: model.presentationMode) { _, _ in
+            setExpanded(isExpanded)
         }
         .task { promptIsFocused = model.presentationMode == .chat }
         .onChange(of: model.presentationID) { _, _ in

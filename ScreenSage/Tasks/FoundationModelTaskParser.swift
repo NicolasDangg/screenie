@@ -40,11 +40,16 @@ struct FoundationModelTaskParser {
                 to: entry,
                 generating: GeneratedTaskEntry.self
             ).content
-            return try makeTask(
-                title: generated.title,
-                dueDateISO8601: generated.dueDateISO8601,
-                notes: generated.notes,
-                createdAt: now
+            return reconcileDueDate(
+                in: try makeTask(
+                    title: generated.title,
+                    dueDateISO8601: generated.dueDateISO8601,
+                    notes: generated.notes,
+                    createdAt: now
+                ),
+                entry: entry,
+                now: now,
+                calendar: calendar
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -83,5 +88,29 @@ struct FoundationModelTaskParser {
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
             createdAt: createdAt
         )
+    }
+
+    static func reconcileDueDate(
+        in task: ScreenieTask,
+        entry: String,
+        now: Date,
+        calendar: Calendar
+    ) -> ScreenieTask {
+        var corrected = task
+        let words = entry.split(whereSeparator: \Character.isWhitespace)
+        let anchor = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: now) ?? now
+
+        for count in [2, 1] where words.count >= count {
+            let suffix = words.suffix(count).joined(separator: " ")
+            if let dueDate = try? TaskEntryParser.parse(
+                "Task due \(suffix)",
+                now: anchor,
+                calendar: calendar
+            ).dueDate {
+                corrected.dueDate = dueDate
+                break
+            }
+        }
+        return corrected
     }
 }
