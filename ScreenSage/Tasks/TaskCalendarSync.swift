@@ -56,6 +56,43 @@ actor TaskCalendarSync {
         try eventStore.remove(event, span: .thisEvent, commit: true)
     }
 
+    func add(_ schedule: TaskSchedule) async throws {
+        guard !schedule.suggestions.isEmpty else { return }
+        guard try await hasAccess() else {
+            throw NSError(
+                domain: "screenie.calendar",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Calendar access was not granted."]
+            )
+        }
+        guard let calendar = eventStore.defaultCalendarForNewEvents else {
+            throw NSError(
+                domain: "screenie.calendar",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "No writable default calendar is available."]
+            )
+        }
+
+        do {
+            for suggestion in schedule.suggestions {
+                try Task.checkCancellation()
+                let descriptor = TaskScheduleCalendarEvent(suggestion: suggestion)
+                guard matchingEvent(marker: descriptor.marker, near: descriptor.startDate) == nil else { continue }
+                let event = EKEvent(eventStore: eventStore)
+                event.calendar = calendar
+                event.title = descriptor.title
+                event.startDate = descriptor.startDate
+                event.endDate = descriptor.endDate
+                event.notes = descriptor.notes
+                try eventStore.save(event, span: .thisEvent, commit: false)
+            }
+            try eventStore.commit()
+        } catch {
+            eventStore.reset()
+            throw error
+        }
+    }
+
     private func matchingEvent(marker: String, near date: Date) -> EKEvent? {
         let predicate = eventStore.predicateForEvents(
             withStart: date.addingTimeInterval(-24 * 60 * 60),
@@ -74,5 +111,21 @@ actor TaskCalendarSync {
         default:
             false
         }
+    }
+}
+
+struct TaskScheduleCalendarEvent: Equatable, Sendable {
+    let title: String
+    let startDate: Date
+    let endDate: Date
+    let notes: String
+    let marker: String
+
+    init(suggestion: TaskScheduleSuggestion) {
+        title = "Study: \(suggestion.taskTitle)"
+        startDate = suggestion.start
+        endDate = suggestion.end
+        marker = "Schedule suggestion: \(suggestion.id)"
+        notes = "\(suggestion.note)\n\nSuggested by screenie\n\(marker)"
     }
 }

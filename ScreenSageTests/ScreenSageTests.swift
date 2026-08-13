@@ -722,6 +722,66 @@ final class ScreenSageTests: XCTestCase {
         )
     }
 
+    func testTaskScheduleCalendarEventMapping() {
+        let suggestion = TaskScheduleSuggestion(
+            taskTitle: "Physics",
+            start: date(2026, 8, 17, 10),
+            end: date(2026, 8, 17, 11),
+            note: "Review unit 3."
+        )
+
+        let event = TaskScheduleCalendarEvent(suggestion: suggestion)
+
+        XCTAssertEqual(event.title, "Study: Physics")
+        XCTAssertEqual(event.startDate, suggestion.start)
+        XCTAssertEqual(event.endDate, suggestion.end)
+        XCTAssertEqual(
+            event.notes,
+            "Review unit 3.\n\nSuggested by screenie\n\(event.marker)"
+        )
+        XCTAssertEqual(event.marker, "Schedule suggestion: \(suggestion.id)")
+    }
+
+    @MainActor
+    func testAppModelDismissesTaskSchedule() {
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+        )
+        model.taskSchedule = TaskSchedule(summary: "Study tonight.", suggestions: [])
+
+        model.dismissTaskSchedule()
+
+        XCTAssertNil(model.taskSchedule)
+        XCTAssertFalse(model.didAddTaskScheduleToCalendar)
+    }
+
+    @MainActor
+    func testAppModelAddsTaskScheduleToCalendar() async {
+        let schedule = TaskSchedule(summary: "Study tonight.", suggestions: [
+            TaskScheduleSuggestion(
+                taskTitle: "Physics",
+                start: date(2026, 8, 17, 10),
+                end: date(2026, 8, 17, 11),
+                note: "Review unit 3."
+            )
+        ])
+        var addedSchedule: TaskSchedule?
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskScheduleCalendarSync: { addedSchedule = $0 }
+        )
+        model.taskSchedule = schedule
+
+        model.addTaskScheduleToCalendar()
+        await waitUntil { !model.isAddingTaskScheduleToCalendar }
+
+        XCTAssertEqual(addedSchedule, schedule)
+        XCTAssertTrue(model.didAddTaskScheduleToCalendar)
+        XCTAssertEqual(model.taskError, "")
+    }
+
     func testTaskScheduleRejectsBackwardTimeRange() throws {
         let content = #"{"summary":"Invalid.","suggestions":[{"taskTitle":"Physics","start":"2026-08-17T11:30:00Z","end":"2026-08-17T10:45:00Z","note":"Wrong order."}]}"#
         let outer = try JSONSerialization.data(withJSONObject: [

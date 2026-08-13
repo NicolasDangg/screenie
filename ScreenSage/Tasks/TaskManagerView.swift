@@ -36,8 +36,12 @@ struct TaskManagerView: View {
                     errorMessage: model.taskError.isEmpty ? model.taskStore.errorMessage : model.taskError,
                     isParsingTask: model.isParsingTask,
                     isRequestingSchedule: model.isRequestingTaskSchedule,
+                    isAddingScheduleToCalendar: model.isAddingTaskScheduleToCalendar,
+                    didAddScheduleToCalendar: model.didAddTaskScheduleToCalendar,
                     toggleCompletion: model.taskStore.toggleCompletion,
-                    requestDelete: requestDelete
+                    requestDelete: requestDelete,
+                    dismissSchedule: model.dismissTaskSchedule,
+                    addScheduleToCalendar: model.addTaskScheduleToCalendar
                 )
             } else {
                 TaskCalendarView(
@@ -60,7 +64,7 @@ struct TaskManagerView: View {
                     .controlSize(.small)
                     .help("Add task")
                 Spacer()
-                Button("Schedule hint", systemImage: "wand.and.stars", action: model.requestScheduleHint)
+                Button("Schedule hint", systemImage: "wand.and.stars", action: showScheduleHint)
                     .buttonStyle(.plain)
                     .disabled(model.isRequestingTaskSchedule)
             }
@@ -98,6 +102,11 @@ struct TaskManagerView: View {
 
     private func showAddTask() {
         isAddingTask = true
+    }
+
+    private func showScheduleHint() {
+        viewMode = .list
+        model.requestScheduleHint()
     }
 
     private func requestDelete(_ task: ScreenieTask) {

@@ -14,6 +14,8 @@ final class AppModel {
     var taskError = ""
     var taskSchedule: TaskSchedule?
     var isRequestingTaskSchedule = false
+    var isAddingTaskScheduleToCalendar = false
+    var didAddTaskScheduleToCalendar = false
     var isParsingTask = false
 
     let settings: AppSettings
@@ -23,8 +25,10 @@ final class AppModel {
     private let mockResponse: String?
     private let mockScheduleResponse: String?
     private let taskParser: @Sendable (String) async throws -> ScreenieTask
+    private let taskScheduleCalendarSync: @MainActor (TaskSchedule) async throws -> Void
     private var requestTask: Task<Void, Never>?
     private var scheduleTask: Task<Void, Never>?
+    private var scheduleCalendarTask: Task<Void, Never>?
     private var taskParsingTask: Task<Void, Never>?
     private var taskParsingID: UUID?
 
@@ -34,6 +38,9 @@ final class AppModel {
         taskStore: TaskStore = TaskStore(),
         mockResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_RESPONSE"],
         mockScheduleResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_SCHEDULE"],
+        taskScheduleCalendarSync: @escaping @MainActor (TaskSchedule) async throws -> Void = {
+            try await TaskCalendarSync.shared.add($0)
+        },
         taskParser: @escaping @Sendable (String) async throws -> ScreenieTask = {
             try await FoundationModelTaskParser.parse($0)
         }
@@ -43,6 +50,7 @@ final class AppModel {
         self.taskStore = taskStore
         self.mockResponse = mockResponse
         self.mockScheduleResponse = mockScheduleResponse
+        self.taskScheduleCalendarSync = taskScheduleCalendarSync
         self.taskParser = taskParser
     }
 
@@ -89,6 +97,9 @@ final class AppModel {
 
         taskError = ""
         taskSchedule = nil
+        scheduleCalendarTask?.cancel()
+        isAddingTaskScheduleToCalendar = false
+        didAddTaskScheduleToCalendar = false
         isRequestingTaskSchedule = true
         scheduleTask?.cancel()
         scheduleTask = Task {
@@ -109,6 +120,44 @@ final class AppModel {
                 return
             } catch {
                 taskError = error.localizedDescription
+            }
+        }
+    }
+
+    func dismissTaskSchedule() {
+        scheduleCalendarTask?.cancel()
+        scheduleCalendarTask = nil
+        taskSchedule = nil
+        taskError = ""
+        isAddingTaskScheduleToCalendar = false
+        didAddTaskScheduleToCalendar = false
+    }
+
+    func addTaskScheduleToCalendar() {
+        guard let schedule = taskSchedule,
+              !isAddingTaskScheduleToCalendar,
+              !didAddTaskScheduleToCalendar else { return }
+
+        taskError = ""
+        isAddingTaskScheduleToCalendar = true
+        scheduleCalendarTask?.cancel()
+        scheduleCalendarTask = Task {
+            defer {
+                if taskSchedule == schedule {
+                    isAddingTaskScheduleToCalendar = false
+                    scheduleCalendarTask = nil
+                }
+            }
+            do {
+                try await taskScheduleCalendarSync(schedule)
+                try Task.checkCancellation()
+                guard taskSchedule == schedule else { return }
+                didAddTaskScheduleToCalendar = true
+            } catch is CancellationError {
+                return
+            } catch {
+                guard taskSchedule == schedule else { return }
+                taskError = "Could not add schedule to Apple Calendar: \(error.localizedDescription)"
             }
         }
     }

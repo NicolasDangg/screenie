@@ -6,8 +6,12 @@ struct TaskListView: View {
     let errorMessage: String
     let isParsingTask: Bool
     let isRequestingSchedule: Bool
+    let isAddingScheduleToCalendar: Bool
+    let didAddScheduleToCalendar: Bool
     let toggleCompletion: (UUID) -> Void
     let requestDelete: (ScreenieTask) -> Void
+    let dismissSchedule: () -> Void
+    let addScheduleToCalendar: () -> Void
 
     var body: some View {
         ScrollView {
@@ -56,7 +60,13 @@ struct TaskListView: View {
 
                 if let schedule {
                     Divider().opacity(0.35)
-                    TaskScheduleView(schedule: schedule)
+                    TaskScheduleView(
+                        schedule: schedule,
+                        isAddingToCalendar: isAddingScheduleToCalendar,
+                        wasAddedToCalendar: didAddScheduleToCalendar,
+                        dismiss: dismissSchedule,
+                        addToCalendar: addScheduleToCalendar
+                    )
                 }
             }
         }
