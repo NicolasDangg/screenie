@@ -10,7 +10,9 @@
   /task phys homework unit 3 due on next tue
   ```
 
-Supported due phrases are `today`, `tomorrow`, `next <weekday>`, a weekday name, and `yyyy-MM-dd`, introduced by `due`, `due on`, or `by`. Entries without a due phrase become undated tasks.
+Screenie uses Apple’s on-device Foundation Models framework to extract the title, due date/time, and explicitly stated notes. Relative phrases such as `tomorrow afternoon` or `in two hours` use the Mac’s current date, time, and time zone. This path does not use Siri, App Intents, the configured API provider, screen capture, or the network.
+
+If Apple Intelligence is unavailable or local generation fails, Screenie falls back to its deterministic parser. The fallback supports `today`, `tomorrow`, `next <weekday>`, a weekday name, and `yyyy-MM-dd`, introduced by `due`, `due on`, or `by`. Entries without a due phrase become undated tasks.
 
 Tasks are saved immediately in `~/Library/Application Support/ScreenSage/tasks.json`, including their completion state and timestamps. Completed tasks remain available after relaunch and can always be restored.
 

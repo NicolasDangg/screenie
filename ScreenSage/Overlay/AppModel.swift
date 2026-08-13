@@ -14,6 +14,7 @@ final class AppModel {
     var taskError = ""
     var taskSchedule: TaskSchedule?
     var isRequestingTaskSchedule = false
+    var isParsingTask = false
 
     let settings: AppSettings
     let taskStore: TaskStore
@@ -21,21 +22,28 @@ final class AppModel {
     private let providerClient = ProviderClient()
     private let mockResponse: String?
     private let mockScheduleResponse: String?
+    private let taskParser: @Sendable (String) async throws -> ScreenieTask
     private var requestTask: Task<Void, Never>?
     private var scheduleTask: Task<Void, Never>?
+    private var taskParsingTask: Task<Void, Never>?
+    private var taskParsingID: UUID?
 
     init(
         settings: AppSettings,
         history: ChatHistoryStore = ChatHistoryStore(),
         taskStore: TaskStore = TaskStore(),
         mockResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_RESPONSE"],
-        mockScheduleResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_SCHEDULE"]
+        mockScheduleResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_SCHEDULE"],
+        taskParser: @escaping @Sendable (String) async throws -> ScreenieTask = {
+            try await FoundationModelTaskParser.parse($0)
+        }
     ) {
         self.settings = settings
         self.history = history
         self.taskStore = taskStore
         self.mockResponse = mockResponse
         self.mockScheduleResponse = mockScheduleResponse
+        self.taskParser = taskParser
     }
 
     var isExpanded: Bool {
@@ -44,6 +52,7 @@ final class AppModel {
 
     func startNewConversation() {
         requestTask?.cancel()
+        cancelTaskParsing()
         prompt = ""
         presentationMode = .chat
         conversation = Conversation()
@@ -61,6 +70,7 @@ final class AppModel {
     }
 
     func presentChat() {
+        cancelTaskParsing()
         presentationMode = .chat
         presentationID += 1
     }
@@ -205,12 +215,34 @@ final class AppModel {
         presentTasks()
         let entry = submittedPrompt.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !entry.isEmpty else { return true }
-        do {
-            taskStore.add(try TaskEntryParser.parse(entry))
-        } catch {
-            taskError = error.localizedDescription
+        taskParsingTask?.cancel()
+        let parsingID = UUID()
+        taskParsingID = parsingID
+        isParsingTask = true
+        taskParsingTask = Task {
+            do {
+                let task = try await taskParser(entry)
+                try Task.checkCancellation()
+                guard taskParsingID == parsingID else { return }
+                taskStore.add(task)
+            } catch is CancellationError {
+            } catch {
+                guard taskParsingID == parsingID else { return }
+                taskError = error.localizedDescription
+            }
+            guard taskParsingID == parsingID else { return }
+            taskParsingTask = nil
+            taskParsingID = nil
+            isParsingTask = false
         }
         return true
+    }
+
+    private func cancelTaskParsing() {
+        taskParsingTask?.cancel()
+        taskParsingTask = nil
+        taskParsingID = nil
+        isParsingTask = false
     }
 
     private func generateTitle(

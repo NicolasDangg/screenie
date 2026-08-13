@@ -4,6 +4,7 @@ struct TaskListView: View {
     let tasks: [ScreenieTask]
     let schedule: TaskSchedule?
     let errorMessage: String
+    let isParsingTask: Bool
     let isRequestingSchedule: Bool
     let toggleCompletion: (UUID) -> Void
 
@@ -26,6 +27,12 @@ struct TaskListView: View {
                                 .opacity(0.28)
                         }
                     }
+                }
+
+                if isParsingTask {
+                    ProgressView("Understanding task…")
+                        .controlSize(.small)
+                        .padding()
                 }
 
                 if isRequestingSchedule {

@@ -32,7 +32,7 @@ Keep these product decisions unless the user explicitly changes them:
 - The overlay saves its x/y origin on hide and restores it on later toggles and launches when that origin remains on a connected display.
 - The live glass effect comes from `NSVisualEffectView` in `LiveBackdropView`, with an adaptive SwiftUI border in `OverlayView`.
 - Assistant output uses bundled `LaTeXSwiftUI` 2.x for local Markdown plus inline/display math rendering; user prompts retain native `AttributedString` Markdown.
-- `/task` and Option–Command–Space open a persistent task manager. Dated tasks synchronize to Apple Calendar through EventKit, and completed tasks remain restorable from History.
+- `/task` and Option–Command–Space open a persistent task manager. `/task <entry>` uses Apple Foundation Models locally for structured natural-language parsing, with the deterministic parser as an availability/failure fallback; it does not use App Intents or a remote provider. Dated tasks synchronize to Apple Calendar through EventKit, and completed tasks remain restorable from History.
 
 ## Request flow
 

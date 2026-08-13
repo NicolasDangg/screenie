@@ -299,6 +299,41 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertThrowsError(try TaskEntryParser.parse("Essay due 999999999999999999999999-08-20"))
     }
 
+    func testFoundationModelOutputBuildsValidatedTask() throws {
+        let dueDateText = "2026-08-18T14:30:00+07:00"
+        let task = try FoundationModelTaskParser.makeTask(
+            title: "  Physics homework  ",
+            dueDateISO8601: dueDateText,
+            notes: "  Unit 3  ",
+            createdAt: date(2026, 8, 13)
+        )
+
+        XCTAssertEqual(task.title, "Physics homework")
+        XCTAssertEqual(task.dueDate, ISO8601DateFormatter().date(from: dueDateText))
+        XCTAssertEqual(task.notes, "Unit 3")
+        XCTAssertEqual(task.createdAt, date(2026, 8, 13))
+        let fractionalDateTask = try FoundationModelTaskParser.makeTask(
+            title: "Physics homework",
+            dueDateISO8601: "2026-08-18T14:30:00.500+07:00",
+            notes: ""
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(fractionalDateTask.dueDate).timeIntervalSince1970,
+            try XCTUnwrap(task.dueDate).timeIntervalSince1970 + 0.5,
+            accuracy: 0.001
+        )
+        XCTAssertThrowsError(try FoundationModelTaskParser.makeTask(
+            title: "  ",
+            dueDateISO8601: nil,
+            notes: ""
+        ))
+        XCTAssertThrowsError(try FoundationModelTaskParser.makeTask(
+            title: "Physics",
+            dueDateISO8601: "next whenever",
+            notes: ""
+        ))
+    }
+
     @MainActor
     func testTaskStoreSortsDueDatesBeforeUndatedTasksAndTogglesCompletion() {
         let store = TaskStore(fileURL: nil, calendarSync: nil)
@@ -485,33 +520,93 @@ final class ScreenSageTests: XCTestCase {
     }
 
     @MainActor
-    func testTaskCommandAddsNaturalLanguageTask() {
+    func testTaskCommandAddsAsyncNaturalLanguageTask() async {
+        let parsedTask = ScreenieTask(
+            title: "Plan revision",
+            dueDate: date(2026, 8, 13, 11)
+        )
         let model = AppModel(
             settings: AppSettings(),
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskParser: { entry in
+                XCTAssertEqual(entry, "plan revision in two hours")
+                try await Task.sleep(for: .milliseconds(1))
+                return parsedTask
+            }
         )
-        model.prompt = "/task phys homework unit 3 due on next tue"
+        model.prompt = "/task plan revision in two hours"
 
         model.submit()
 
         XCTAssertEqual(model.presentationMode, .tasks)
-        XCTAssertEqual(model.taskStore.tasks.first?.title, "phys homework unit 3")
-        XCTAssertNotNil(model.taskStore.tasks.first?.dueDate)
+        XCTAssertTrue(model.isParsingTask)
+        await waitUntil { !model.isParsingTask }
+        XCTAssertEqual(model.taskStore.tasks, [parsedTask])
     }
 
     @MainActor
-    func testTaskCommandShowsInvalidDueDateInline() {
+    func testTaskCommandShowsInvalidDueDateInline() async {
         let model = AppModel(
             settings: AppSettings(),
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskParser: { _ in
+                throw TaskEntryParserError.invalidDueDate("eventually")
+            }
         )
         model.prompt = "/task essay due eventually"
 
         model.submit()
 
         XCTAssertEqual(model.presentationMode, .tasks)
+        await waitUntil { !model.isParsingTask }
         XCTAssertTrue(model.taskError.contains("eventually"))
         XCTAssertTrue(model.taskStore.tasks.isEmpty)
+    }
+
+    @MainActor
+    func testLeavingTaskModeCancelsPendingTaskCreation() async {
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskParser: { _ in
+                try await Task.sleep(for: .milliseconds(30))
+                return ScreenieTask(title: "Must not be added")
+            }
+        )
+        model.prompt = "/task cancel me"
+
+        model.submit()
+        model.presentChat()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(model.presentationMode, .chat)
+        XCTAssertFalse(model.isParsingTask)
+        XCTAssertTrue(model.taskStore.tasks.isEmpty)
+    }
+
+    @MainActor
+    func testReplacingTaskParseKeepsNewestProgressAndResult() async {
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskParser: { entry in
+                if entry == "first" {
+                    try? await Task.sleep(for: .milliseconds(5))
+                    return ScreenieTask(title: "Stale")
+                }
+                try await Task.sleep(for: .milliseconds(40))
+                return ScreenieTask(title: "Newest")
+            }
+        )
+        model.prompt = "/task first"
+        model.submit()
+        model.prompt = "/task second"
+        model.submit()
+
+        try? await Task.sleep(for: .milliseconds(15))
+        XCTAssertTrue(model.isParsingTask)
+        await waitUntil { !model.isParsingTask }
+        XCTAssertEqual(model.taskStore.tasks.map(\.title), ["Newest"])
     }
 
     func testTaskScheduleRequestUsesStrictJSONSchemaAndIncompleteTasks() throws {

@@ -34,6 +34,7 @@ struct TaskManagerView: View {
                     tasks: model.taskStore.sortedTasks,
                     schedule: model.taskSchedule,
                     errorMessage: model.taskError.isEmpty ? model.taskStore.errorMessage : model.taskError,
+                    isParsingTask: model.isParsingTask,
                     isRequestingSchedule: model.isRequestingTaskSchedule,
                     toggleCompletion: model.taskStore.toggleCompletion
                 )
