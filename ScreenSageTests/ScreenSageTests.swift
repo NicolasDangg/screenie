@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import ServiceManagement
+import SwiftUI
 import XCTest
 @testable import ScreenSage
 
@@ -101,6 +102,23 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(GlobalHotKey.taskModifiers, UInt32(optionKey | cmdKey))
         XCTAssertTrue(GlobalHotKey.shouldHandle(eventID: 2, registeredID: 2))
         XCTAssertFalse(GlobalHotKey.shouldHandle(eventID: 1, registeredID: 2))
+    }
+
+    @MainActor
+    func testTaskManagerDefaultsToListView() {
+        let view = TaskManagerView(model: AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+        ))
+        let state = Mirror(reflecting: view).children
+            .first { $0.label == "_viewMode" }?.value as? State<TaskViewMode>
+
+        guard let state else {
+            return XCTFail("Missing task view mode state")
+        }
+        guard case .list = state.wrappedValue else {
+            return XCTFail("Task manager should open in list view")
+        }
     }
 
     func testAppStaysMenuBarOnly() {

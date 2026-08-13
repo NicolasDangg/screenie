@@ -2,7 +2,7 @@ import SwiftUI
 
 struct TaskManagerView: View {
     @Bindable var model: AppModel
-    @State private var viewMode = TaskViewMode.calendar
+    @State private var viewMode = TaskViewMode.list
     @State private var isAddingTask = false
     @State private var pendingDeletion: ScreenieTask?
 
