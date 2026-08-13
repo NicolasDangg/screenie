@@ -44,4 +44,9 @@ final class AppSettings {
         defaults.set(apiKey, forKey: Keys.apiKey(for: provider))
         savedMessage = apiKey.isEmpty ? "API key removed" : "API key saved locally"
     }
+
+    func apiKey(for provider: AIProvider) -> String {
+        if provider == self.provider { return apiKey }
+        return defaults.string(forKey: Keys.apiKey(for: provider)) ?? ""
+    }
 }

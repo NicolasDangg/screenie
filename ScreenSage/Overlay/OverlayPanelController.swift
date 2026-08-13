@@ -63,6 +63,21 @@ final class OverlayPanelController {
         isPresented ? hide() : show()
     }
 
+    func toggleTaskScreen() {
+        if isPresented, model.presentationMode == .tasks {
+            hide()
+        } else {
+            showTasks()
+        }
+    }
+
+    func showTasks() {
+        if !isPresented { show() }
+        model.presentTasks()
+        setExpanded(true)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
     func startNewChat() {
         if isPresented {
             model.finishConversation()

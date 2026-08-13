@@ -1,6 +1,26 @@
 import Foundation
 
 struct ProviderClient: Sendable {
+    func taskSchedule(
+        model: String,
+        apiKey: String,
+        tasks: [ScreenieTask]
+    ) async throws -> TaskSchedule {
+        var request = URLRequest(url: AIProvider.openRouter.endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ProviderRequestBuilder.taskScheduleRequestBody(
+            model: model,
+            tasks: tasks
+        ))
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw ProviderError.requestFailed(String(data: data, encoding: .utf8) ?? "Request failed")
+        }
+        return try TaskSchedule.decodeOpenRouterResponse(data)
+    }
+
     func stream(
         provider: AIProvider,
         model: String,

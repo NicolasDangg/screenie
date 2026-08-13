@@ -5,6 +5,30 @@ import XCTest
 @testable import ScreenSage
 
 final class ScreenSageTests: XCTestCase {
+    private var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 9) -> Date {
+        utcCalendar.date(from: DateComponents(
+            year: year,
+            month: month,
+            day: day,
+            hour: hour
+        ))!
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<100 {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Timed out waiting for asynchronous state change")
+    }
+
     @MainActor
     func testLiveBackdropUsesActiveBehindWindowBlending() {
         let backdrop = LiveBackdropView.makeVisualEffectView()
@@ -24,9 +48,10 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertTrue(AppPermission.inputMonitoring.settingsURL.absoluteString.contains("Privacy_ListenEvent"))
     }
 
-    func testAppIdentityAndCaptureUsageDescription() {
+    func testAppIdentityAndUsageDescriptions() {
         XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String, "screenie")
         XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "NSScreenCaptureUsageDescription"))
+        XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "NSCalendarsFullAccessUsageDescription"))
     }
 
     func testAppUsesScreenieAppIcon() {
@@ -69,6 +94,12 @@ final class ScreenSageTests: XCTestCase {
     func testGlobalShortcutIsOptionSpace() {
         XCTAssertEqual(GlobalHotKey.keyCode, UInt32(kVK_Space))
         XCTAssertEqual(GlobalHotKey.modifiers, UInt32(optionKey))
+    }
+
+    func testTaskShortcutIsOptionCommandSpace() {
+        XCTAssertEqual(GlobalHotKey.taskModifiers, UInt32(optionKey | cmdKey))
+        XCTAssertTrue(GlobalHotKey.shouldHandle(eventID: 2, registeredID: 2))
+        XCTAssertFalse(GlobalHotKey.shouldHandle(eventID: 1, registeredID: 2))
     }
 
     func testAppStaysMenuBarOnly() {
@@ -115,7 +146,10 @@ final class ScreenSageTests: XCTestCase {
 
     @MainActor
     func testOverlayPanelTogglesPresentedState() {
-        let controller = OverlayPanelController(model: AppModel(settings: AppSettings()))
+        let controller = OverlayPanelController(model: AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+        ))
 
         XCTAssertFalse(controller.isPresented)
         controller.toggle()
@@ -126,9 +160,10 @@ final class ScreenSageTests: XCTestCase {
 
     @MainActor
     func testAppRuntimeStartsWithOverlayHidden() {
-        AppRuntime.shared.start()
+        let runtime = AppRuntime(taskStore: TaskStore(fileURL: nil, calendarSync: nil))
+        runtime.start()
 
-        XCTAssertFalse(AppRuntime.shared.isOverlayPresented)
+        XCTAssertFalse(runtime.isOverlayPresented)
     }
 
     func testLoginItemRegistrationHandlesMissingService() {
@@ -143,7 +178,11 @@ final class ScreenSageTests: XCTestCase {
         let fileURL = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString)
             .appending(path: "history.json")
-        let model = AppModel(settings: AppSettings(), history: ChatHistoryStore(fileURL: fileURL))
+        let model = AppModel(
+            settings: AppSettings(),
+            history: ChatHistoryStore(fileURL: fileURL),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+        )
         model.prompt = "Draft"
         model.conversation = Conversation(
             title: "Old topic",
@@ -166,6 +205,7 @@ final class ScreenSageTests: XCTestCase {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let model = AppModel(
             settings: AppSettings(defaults: defaults),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
             mockResponse: "**Answer:** The closure captures `count`."
         )
         model.prompt = "Explain this code"
@@ -220,5 +260,321 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(SSEDecoder.delta(from: openAI, provider: .openAI), "Hello")
         XCTAssertEqual(SSEDecoder.delta(from: openRouter, provider: .openRouter), "World")
         XCTAssertNil(SSEDecoder.delta(from: "[DONE]", provider: .openAI))
+    }
+
+    func testTaskParserReadsSampleNaturalLanguageEntry() throws {
+        let task = try TaskEntryParser.parse(
+            "phys homework unit 3 due on next tue",
+            now: date(2026, 8, 13),
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(task.title, "phys homework unit 3")
+        XCTAssertEqual(task.dueDate, date(2026, 8, 18))
+    }
+
+    func testTaskParserReadsRelativeAndISODateEntries() throws {
+        let tomorrow = try TaskEntryParser.parse(
+            "Submit essay due tomorrow",
+            now: date(2026, 8, 13),
+            calendar: utcCalendar
+        )
+        let iso = try TaskEntryParser.parse(
+            "Return books by 2026-08-20",
+            now: date(2026, 8, 13),
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(tomorrow.dueDate, date(2026, 8, 14))
+        XCTAssertEqual(iso.dueDate, date(2026, 8, 20))
+    }
+
+    func testTaskParserAcceptsUndatedEntryAndRejectsInvalidDuePhrase() throws {
+        let task = try TaskEntryParser.parse("Buy lab notebook")
+
+        XCTAssertEqual(task.title, "Buy lab notebook")
+        XCTAssertNil(task.dueDate)
+        XCTAssertThrowsError(try TaskEntryParser.parse("Essay due eventually"))
+        XCTAssertThrowsError(try TaskEntryParser.parse("Essay due 2026-08-20-extra"))
+        XCTAssertThrowsError(try TaskEntryParser.parse("Essay due 999999999999999999999999-08-20"))
+    }
+
+    @MainActor
+    func testTaskStoreSortsDueDatesBeforeUndatedTasksAndTogglesCompletion() {
+        let store = TaskStore(fileURL: nil, calendarSync: nil)
+        let undated = ScreenieTask(title: "Undated")
+        let later = ScreenieTask(title: "Later", dueDate: date(2026, 8, 20))
+        let sooner = ScreenieTask(title: "Sooner", dueDate: date(2026, 8, 14))
+
+        store.add(undated)
+        store.add(later)
+        store.add(sooner)
+        store.toggleCompletion(of: sooner.id)
+
+        XCTAssertEqual(store.sortedTasks.map(\.title), ["Sooner", "Later", "Undated"])
+        XCTAssertTrue(store.sortedTasks[0].isCompleted)
+    }
+
+    @MainActor
+    func testTaskStorePersistsCompletionAndRestoration() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "tasks.json")
+        let createdAt = date(2026, 8, 13)
+        let completedAt = date(2026, 8, 14)
+        let task = ScreenieTask(
+            title: "Physics",
+            dueDate: date(2026, 8, 18),
+            notes: "Unit 3",
+            createdAt: createdAt
+        )
+        let store = TaskStore(fileURL: fileURL, calendarSync: nil)
+
+        store.add(task)
+        XCTAssertEqual(TaskStore(fileURL: fileURL, calendarSync: nil).tasks, [task])
+
+        store.toggleCompletion(of: task.id, at: completedAt)
+        let completed = try XCTUnwrap(TaskStore(fileURL: fileURL, calendarSync: nil).tasks.first)
+        XCTAssertTrue(completed.isCompleted)
+        XCTAssertEqual(completed.completedAt, completedAt)
+
+        store.toggleCompletion(of: task.id, at: date(2026, 8, 15))
+        let restored = try XCTUnwrap(TaskStore(fileURL: fileURL, calendarSync: nil).tasks.first)
+        XCTAssertFalse(restored.isCompleted)
+        XCTAssertNil(restored.completedAt)
+
+        let json = try String(contentsOf: fileURL, encoding: .utf8)
+        XCTAssertFalse(json.contains("imageData"))
+        XCTAssertFalse(json.contains("ocrText"))
+        XCTAssertFalse(json.contains("taskSchedule"))
+    }
+
+    @MainActor
+    func testTaskStoreKeepsCorruptFileAndOrdersCompletedTasksNewestFirst() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "tasks.json")
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("not json".utf8).write(to: fileURL)
+
+        let corruptStore = TaskStore(fileURL: fileURL, calendarSync: nil)
+
+        XCTAssertTrue(corruptStore.tasks.isEmpty)
+        XCTAssertTrue(corruptStore.lastError.contains("Could not load tasks"))
+        XCTAssertEqual(try String(contentsOf: fileURL, encoding: .utf8), "not json")
+
+        let store = TaskStore(fileURL: nil, calendarSync: nil)
+        let older = ScreenieTask(
+            title: "Older",
+            isCompleted: true,
+            createdAt: date(2026, 8, 10),
+            completedAt: date(2026, 8, 11)
+        )
+        let newer = ScreenieTask(
+            title: "Newer",
+            isCompleted: true,
+            createdAt: date(2026, 8, 12),
+            completedAt: date(2026, 8, 13)
+        )
+        store.add(older)
+        store.add(newer)
+
+        XCTAssertEqual(store.completedTasks.map(\.title), ["Newer", "Older"])
+    }
+
+    func testTaskCalendarEventMapping() {
+        let task = ScreenieTask(
+            title: "Physics",
+            dueDate: date(2026, 8, 18),
+            notes: "Unit 3",
+            isCompleted: true
+        )
+
+        let event = TaskCalendarEvent(task: task)
+
+        XCTAssertEqual(event.title, "✓ Physics")
+        XCTAssertEqual(event.startDate, date(2026, 8, 18))
+        XCTAssertEqual(event.endDate, date(2026, 8, 18).addingTimeInterval(30 * 60))
+        XCTAssertEqual(
+            event.notes,
+            "Unit 3\n\nManaged by screenie\nTask ID: \(task.id.uuidString)"
+        )
+        XCTAssertEqual(event.taskMarker, "Task ID: \(task.id.uuidString)")
+    }
+
+    @MainActor
+    func testTaskStoreRollsBackWhenPersistenceFails() {
+        let store = TaskStore(
+            fileURL: URL(filePath: "/dev/null/tasks.json"),
+            calendarSync: nil
+        )
+
+        store.add(ScreenieTask(title: "Must not appear saved"))
+
+        XCTAssertTrue(store.tasks.isEmpty)
+        XCTAssertTrue(store.lastError.contains("Could not save tasks"))
+        XCTAssertEqual(store.errorMessage, store.lastError)
+    }
+
+    @MainActor
+    func testTaskStorePersistsCalendarEventIdentifierAfterSync() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "tasks.json")
+        let task = ScreenieTask(title: "Physics", dueDate: date(2026, 8, 18))
+        let store = TaskStore(fileURL: fileURL) { synchronizedTask in
+            XCTAssertEqual(synchronizedTask.id, task.id)
+            return "event-123"
+        }
+
+        store.add(task)
+        await waitUntil { store.tasks.first?.calendarEventIdentifier == "event-123" }
+
+        XCTAssertEqual(store.tasks.first?.calendarEventIdentifier, "event-123")
+        XCTAssertEqual(
+            TaskStore(fileURL: fileURL, calendarSync: nil).tasks.first?.calendarEventIdentifier,
+            "event-123"
+        )
+    }
+
+    @MainActor
+    func testTaskStoreRetainsEachCalendarSyncErrorUntilThatTaskSucceeds() async {
+        let failed = ScreenieTask(title: "Fails", dueDate: date(2026, 8, 18))
+        let succeeds = ScreenieTask(title: "Succeeds", dueDate: date(2026, 8, 19))
+        let store = TaskStore(fileURL: nil) { task in
+            guard task.id != failed.id else {
+                throw NSError(
+                    domain: "calendar-test",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Intentional failure"]
+                )
+            }
+            return "event-\(task.id)"
+        }
+
+        store.add(failed)
+        store.add(succeeds)
+        await waitUntil {
+            store.tasks.first(where: { $0.id == succeeds.id })?.calendarEventIdentifier != nil
+                && !store.calendarError(for: failed.id).isEmpty
+        }
+
+        XCTAssertTrue(store.calendarError(for: failed.id).contains("Intentional failure"))
+        XCTAssertTrue(store.calendarError(for: succeeds.id).isEmpty)
+        XCTAssertFalse(store.calendarError.isEmpty)
+    }
+
+    @MainActor
+    func testTaskCommandOpensTaskModeWithoutAPIKeyOrCapture() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let model = AppModel(
+            settings: AppSettings(defaults: defaults),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+        )
+        model.prompt = "/task"
+
+        model.submit()
+
+        XCTAssertEqual(model.presentationMode, .tasks)
+        XCTAssertEqual(model.prompt, "")
+        XCTAssertEqual(model.errorMessage, "")
+        XCTAssertTrue(model.taskStore.tasks.isEmpty)
+    }
+
+    @MainActor
+    func testTaskCommandAddsNaturalLanguageTask() {
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+        )
+        model.prompt = "/task phys homework unit 3 due on next tue"
+
+        model.submit()
+
+        XCTAssertEqual(model.presentationMode, .tasks)
+        XCTAssertEqual(model.taskStore.tasks.first?.title, "phys homework unit 3")
+        XCTAssertNotNil(model.taskStore.tasks.first?.dueDate)
+    }
+
+    @MainActor
+    func testTaskCommandShowsInvalidDueDateInline() {
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+        )
+        model.prompt = "/task essay due eventually"
+
+        model.submit()
+
+        XCTAssertEqual(model.presentationMode, .tasks)
+        XCTAssertTrue(model.taskError.contains("eventually"))
+        XCTAssertTrue(model.taskStore.tasks.isEmpty)
+    }
+
+    func testTaskScheduleRequestUsesStrictJSONSchemaAndIncompleteTasks() throws {
+        let tasks = [
+            ScreenieTask(title: "Physics", dueDate: date(2026, 8, 18)),
+            ScreenieTask(title: "Finished", isCompleted: true)
+        ]
+        let body = ProviderRequestBuilder.taskScheduleRequestBody(
+            model: "openai/gpt-5.6-luna",
+            tasks: tasks,
+            now: date(2026, 8, 13),
+            timeZone: TimeZone(secondsFromGMT: 0)!
+        )
+        let json = String(data: try JSONSerialization.data(withJSONObject: body), encoding: .utf8)!
+
+        XCTAssertEqual(body["stream"] as? Bool, false)
+        XCTAssertTrue(json.contains("json_schema"))
+        XCTAssertTrue(json.contains("additionalProperties"))
+        XCTAssertTrue(json.contains("require_parameters"))
+        XCTAssertTrue(json.contains("Monday: Period 4 (10:45-11:30)"))
+        XCTAssertTrue(json.contains("Physics"))
+        XCTAssertFalse(json.contains("Finished"))
+    }
+
+    func testTaskScheduleDecodesOpenRouterResponse() throws {
+        let content = #"{"summary":"Use two study periods.","suggestions":[{"taskTitle":"Physics","start":"2026-08-17T10:45:00Z","end":"2026-08-17T11:30:00Z","note":"Start with unit 3."}]}"#
+        let outer = try JSONSerialization.data(withJSONObject: [
+            "choices": [["message": ["content": content]]]
+        ])
+
+        let schedule = try TaskSchedule.decodeOpenRouterResponse(outer)
+
+        XCTAssertEqual(schedule.summary, "Use two study periods.")
+        XCTAssertEqual(schedule.suggestions.first?.taskTitle, "Physics")
+        XCTAssertEqual(
+            schedule.suggestions.first?.start,
+            utcCalendar.date(from: DateComponents(year: 2026, month: 8, day: 17, hour: 10, minute: 45))
+        )
+    }
+
+    func testTaskScheduleRejectsBackwardTimeRange() throws {
+        let content = #"{"summary":"Invalid.","suggestions":[{"taskTitle":"Physics","start":"2026-08-17T11:30:00Z","end":"2026-08-17T10:45:00Z","note":"Wrong order."}]}"#
+        let outer = try JSONSerialization.data(withJSONObject: [
+            "choices": [["message": ["content": content]]]
+        ])
+
+        XCTAssertThrowsError(try TaskSchedule.decodeOpenRouterResponse(outer))
+    }
+
+    func testTaskScheduleRejectsUnknownJSONProperties() {
+        let content = #"{"summary":"No extras.","unexpected":true,"suggestions":[]}"#.data(using: .utf8)!
+
+        XCTAssertThrowsError(try TaskSchedule.decodeContent(content))
+    }
+
+    @MainActor
+    func testSettingsCanReadSavedOpenRouterKeyWhenOpenAIIsSelected() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let settings = AppSettings(defaults: defaults)
+        settings.apiKey = "router-key"
+        settings.saveAPIKey()
+        settings.provider = .openAI
+
+        XCTAssertEqual(settings.apiKey(for: .openRouter), "router-key")
     }
 }

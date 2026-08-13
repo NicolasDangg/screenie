@@ -10,34 +10,38 @@ struct OverlayView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if isExpanded {
-                OverlayAnswerView(
-                    messages: model.conversation.messages,
-                    streamingResponse: model.streamingResponse,
-                    errorMessage: model.errorMessage,
-                    isWorking: model.isWorking
-                )
-                Divider().opacity(0.35)
-            }
+            if model.presentationMode == .tasks {
+                TaskManagerView(model: model)
+            } else {
+                if isExpanded {
+                    OverlayAnswerView(
+                        messages: model.conversation.messages,
+                        streamingResponse: model.streamingResponse,
+                        errorMessage: model.errorMessage,
+                        isWorking: model.isWorking
+                    )
+                    Divider().opacity(0.35)
+                }
 
-            HStack(spacing: 6) {
-                TextField("Ask about your screen", text: $model.prompt)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1)
-                    .focused($promptIsFocused)
-                    .onSubmit(model.submit)
+                HStack(spacing: 6) {
+                    TextField("Ask about your screen", text: $model.prompt)
+                        .textFieldStyle(.plain)
+                        .lineLimit(1)
+                        .focused($promptIsFocused)
+                        .onSubmit(model.submit)
 
-                Button("Send", systemImage: "arrow.up", action: model.submit)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .frame(width: 25.2, height: 25.2)
-                    .background(.blue, in: .circle)
-                    .foregroundStyle(.white)
-                    .opacity(model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
-                    .disabled(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Send", systemImage: "arrow.up", action: model.submit)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .frame(width: 25.2, height: 25.2)
+                        .background(.blue, in: .circle)
+                        .foregroundStyle(.white)
+                        .opacity(model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
+                        .disabled(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(.horizontal, 14.1)
+                .frame(height: OverlayLayout.collapsedHeight)
             }
-            .padding(.horizontal, 14.1)
-            .frame(height: OverlayLayout.collapsedHeight)
         }
         .frame(
             width: OverlayLayout.width,
@@ -62,8 +66,10 @@ struct OverlayView: View {
         .onChange(of: isExpanded, initial: true) { _, expanded in
             setExpanded(expanded)
         }
-        .task { promptIsFocused = true }
-        .onChange(of: model.presentationID) { _, _ in promptIsFocused = true }
+        .task { promptIsFocused = model.presentationMode == .chat }
+        .onChange(of: model.presentationID) { _, _ in
+            promptIsFocused = model.presentationMode == .chat
+        }
     }
 }
 

@@ -5,40 +5,102 @@ import Observation
 @Observable
 final class AppModel {
     var prompt = ""
+    var presentationMode = AppPresentationMode.chat
     var conversation = Conversation()
     var streamingResponse = ""
     var errorMessage = ""
     var isWorking = false
     var presentationID = 0
+    var taskError = ""
+    var taskSchedule: TaskSchedule?
+    var isRequestingTaskSchedule = false
 
     let settings: AppSettings
+    let taskStore: TaskStore
     private let history: ChatHistoryStore
     private let providerClient = ProviderClient()
     private let mockResponse: String?
+    private let mockScheduleResponse: String?
     private var requestTask: Task<Void, Never>?
+    private var scheduleTask: Task<Void, Never>?
 
     init(
         settings: AppSettings,
         history: ChatHistoryStore = ChatHistoryStore(),
-        mockResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_RESPONSE"]
+        taskStore: TaskStore = TaskStore(),
+        mockResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_RESPONSE"],
+        mockScheduleResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_SCHEDULE"]
     ) {
         self.settings = settings
         self.history = history
+        self.taskStore = taskStore
         self.mockResponse = mockResponse
+        self.mockScheduleResponse = mockScheduleResponse
     }
 
     var isExpanded: Bool {
-        isWorking || !conversation.messages.isEmpty || !errorMessage.isEmpty
+        presentationMode == .tasks || isWorking || !conversation.messages.isEmpty || !errorMessage.isEmpty
     }
 
     func startNewConversation() {
         requestTask?.cancel()
         prompt = ""
+        presentationMode = .chat
         conversation = Conversation()
         streamingResponse = ""
         errorMessage = ""
         isWorking = false
         presentationID += 1
+    }
+
+    func presentTasks() {
+        presentationMode = .tasks
+        prompt = ""
+        taskError = ""
+        presentationID += 1
+    }
+
+    func presentChat() {
+        presentationMode = .chat
+        presentationID += 1
+    }
+
+    func requestScheduleHint() {
+        let tasks = taskStore.tasks.filter { !$0.isCompleted }
+        guard !tasks.isEmpty else {
+            taskError = "Add an incomplete task before requesting a schedule hint."
+            return
+        }
+        let apiKey = settings.apiKey(for: .openRouter).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard mockScheduleResponse != nil || !apiKey.isEmpty else {
+            taskError = "Add an OpenRouter API key in Settings before requesting a schedule hint."
+            return
+        }
+
+        taskError = ""
+        taskSchedule = nil
+        isRequestingTaskSchedule = true
+        scheduleTask?.cancel()
+        scheduleTask = Task {
+            defer { isRequestingTaskSchedule = false }
+            do {
+                if let mockScheduleResponse,
+                   let data = mockScheduleResponse.data(using: .utf8) {
+                    taskSchedule = try TaskSchedule.decodeContent(data)
+                } else {
+                    let model = settings.provider == .openRouter ? settings.model : AIProvider.openRouter.defaultModel
+                    taskSchedule = try await providerClient.taskSchedule(
+                        model: model,
+                        apiKey: apiKey,
+                        tasks: tasks
+                    )
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                taskError = error.localizedDescription
+            }
+        }
     }
 
     func finishConversation() {
@@ -53,6 +115,7 @@ final class AppModel {
     func submit() {
         let submittedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !submittedPrompt.isEmpty, !isWorking else { return }
+        if handleTaskCommand(submittedPrompt) { return }
         if let mockResponse {
             prompt = ""
             errorMessage = ""
@@ -133,6 +196,21 @@ final class AppModel {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func handleTaskCommand(_ submittedPrompt: String) -> Bool {
+        let lowercased = submittedPrompt.lowercased()
+        guard lowercased == "/task" || lowercased.hasPrefix("/task ") else { return false }
+
+        presentTasks()
+        let entry = submittedPrompt.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entry.isEmpty else { return true }
+        do {
+            taskStore.add(try TaskEntryParser.parse(entry))
+        } catch {
+            taskError = error.localizedDescription
+        }
+        return true
     }
 
     private func generateTitle(

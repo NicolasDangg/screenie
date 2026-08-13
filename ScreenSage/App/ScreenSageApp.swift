@@ -9,7 +9,10 @@ struct ScreenSageApp: App {
             MenuBarContentView()
         }
         Window("History", id: "history") {
-            HistoryView(store: AppRuntime.shared.history)
+            HistoryRootView(
+                conversationStore: AppRuntime.shared.history,
+                taskStore: AppRuntime.shared.model.taskStore
+            )
         }
         .defaultSize(width: 720, height: 520)
         Settings { SettingsView(settings: AppRuntime.shared.settings) }

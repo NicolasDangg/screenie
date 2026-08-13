@@ -9,7 +9,7 @@ Keep these product decisions unless the user explicitly changes them:
 - Capture exactly one screenshot when a prompt is submitted; never continuously stream or poll the screen.
 - Run Apple Vision OCR on that screenshot and send both the image and extracted text with the prompt.
 - Do not add meeting transcription, audio recording, or screenshare-hiding/evasion behavior.
-- Persist only prompts, AI responses, generated topic titles, and timestamps. Never persist screenshots or OCR text.
+- Persist only prompts, AI responses, generated topic titles, timestamps, and task fields required for recovery and Calendar sync. Never persist screenshots, OCR text, schedule hints, or AI request payloads.
 - Starting a newly presented overlay starts a new conversation; completed conversations remain in local history.
 - Conversation titles contain only the topic, never the foreground application name.
 - The app is for one local user. API keys are intentionally stored in `UserDefaults`, not Keychain, to avoid password prompts.
@@ -32,6 +32,7 @@ Keep these product decisions unless the user explicitly changes them:
 - The overlay saves its x/y origin on hide and restores it on later toggles and launches when that origin remains on a connected display.
 - The live glass effect comes from `NSVisualEffectView` in `LiveBackdropView`, with an adaptive SwiftUI border in `OverlayView`.
 - Assistant output uses bundled `LaTeXSwiftUI` 2.x for local Markdown plus inline/display math rendering; user prompts retain native `AttributedString` Markdown.
+- `/task` and Option–Command–Space open a persistent task manager. Dated tasks synchronize to Apple Calendar through EventKit, and completed tasks remain restorable from History.
 
 ## Request flow
 
@@ -54,6 +55,7 @@ Keep these product decisions unless the user explicitly changes them:
 - `ScreenSage/Capture/`: one-shot ScreenCaptureKit capture and Vision OCR.
 - `ScreenSage/Provider/`: OpenAI/OpenRouter payloads, networking, and SSE decoding.
 - `ScreenSage/Conversation/`: message models and JSON history persistence.
+- `ScreenSage/Tasks/`: task parsing, JSON persistence, task UI, schedule hints, and EventKit synchronization.
 - `ScreenSage/Settings/`: provider/API-key preferences and permission status UI.
 - `ScreenSageTests/ScreenSageTests.swift`: regression checks.
 - `scripts/install.sh`: signed Release build, replacement of `/Applications/screenie.app`, and relaunch.
@@ -61,8 +63,10 @@ Keep these product decisions unless the user explicitly changes them:
 ## Persistence and permissions
 
 - History: `~/Library/Application Support/ScreenSage/history.json`
+- Tasks: `~/Library/Application Support/ScreenSage/tasks.json`
 - Provider/model/API keys: local `UserDefaults` preferences.
 - Screen Recording is required for real requests.
+- Full Calendar access is requested when the first dated task needs synchronization. Calendar failure never removes the local task.
 - Accessibility and Input Monitoring are shown as optional; the Carbon global shortcut does not depend on them.
 - Permission status comes from the native preflight APIs. Settings buttons deep-link to the appropriate Privacy & Security pane.
 - Screen Recording grants can require restarting screenie before capture works.
@@ -111,7 +115,7 @@ Do not turn mock mode into a permanent user setting unless requested; its curren
 
 ## Change guardrails
 
-- Prefer native SwiftUI, AppKit, ScreenCaptureKit, Vision, Foundation, and Carbon APIs. There are no third-party dependencies.
+- Prefer native SwiftUI, AppKit, ScreenCaptureKit, Vision, EventKit, Foundation, and Carbon APIs. There are no third-party dependencies.
 - Keep the UI compact and avoid adding suggestion chips, mode pickers, voice controls, or decorative leading icons unless requested.
 - Keep the input bar at the bottom when expanded; answers grow above it.
 - Preserve text selection, keyboard focus on presentation, Escape-to-close, draggable behavior, fade visibility animation, adaptive glass, and the single-instance expectation.
