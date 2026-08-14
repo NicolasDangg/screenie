@@ -39,6 +39,7 @@ struct TaskManagerView: View {
                     isAddingScheduleToCalendar: model.isAddingTaskScheduleToCalendar,
                     didAddScheduleToCalendar: model.didAddTaskScheduleToCalendar,
                     toggleCompletion: model.taskStore.toggleCompletion,
+                    updateDueDate: model.taskStore.updateDueDate,
                     requestDelete: requestDelete,
                     dismissSchedule: model.dismissTaskSchedule,
                     addScheduleToCalendar: model.addTaskScheduleToCalendar
@@ -50,6 +51,7 @@ struct TaskManagerView: View {
                     isParsingTask: model.isParsingTask,
                     isRequestingSchedule: model.isRequestingTaskSchedule,
                     toggleCompletion: model.taskStore.toggleCompletion,
+                    updateDueDate: model.taskStore.updateDueDate,
                     requestDelete: requestDelete
                 )
             }

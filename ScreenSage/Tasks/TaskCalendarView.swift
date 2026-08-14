@@ -6,6 +6,7 @@ struct TaskCalendarView: View {
     let isParsingTask: Bool
     let isRequestingSchedule: Bool
     let toggleCompletion: (UUID) -> Void
+    let updateDueDate: (UUID, Date?) -> Void
     let requestDelete: (ScreenieTask) -> Void
 
     @State private var displayedMonth: Date
@@ -22,6 +23,7 @@ struct TaskCalendarView: View {
         isParsingTask: Bool,
         isRequestingSchedule: Bool,
         toggleCompletion: @escaping (UUID) -> Void,
+        updateDueDate: @escaping (UUID, Date?) -> Void,
         requestDelete: @escaping (ScreenieTask) -> Void,
         calendar: Calendar = .autoupdatingCurrent,
         today: Date = .now
@@ -31,6 +33,7 @@ struct TaskCalendarView: View {
         self.isParsingTask = isParsingTask
         self.isRequestingSchedule = isRequestingSchedule
         self.toggleCompletion = toggleCompletion
+        self.updateDueDate = updateDueDate
         self.requestDelete = requestDelete
         self.calendar = calendar
         self.today = today
@@ -173,6 +176,7 @@ struct TaskCalendarView: View {
                                 task: task,
                                 isAgenda: true,
                                 toggleCompletion: { toggleCompletion(task.id) },
+                                updateDueDate: { updateDueDate(task.id, $0) },
                                 delete: { requestDelete(task) }
                             )
                         }

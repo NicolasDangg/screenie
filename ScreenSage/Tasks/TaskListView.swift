@@ -9,6 +9,7 @@ struct TaskListView: View {
     let isAddingScheduleToCalendar: Bool
     let didAddScheduleToCalendar: Bool
     let toggleCompletion: (UUID) -> Void
+    let updateDueDate: (UUID, Date?) -> Void
     let requestDelete: (ScreenieTask) -> Void
     let dismissSchedule: () -> Void
     let addScheduleToCalendar: () -> Void
@@ -28,6 +29,7 @@ struct TaskListView: View {
                         TaskRowView(
                             task: task,
                             toggleCompletion: { toggleCompletion(task.id) },
+                            updateDueDate: { updateDueDate(task.id, $0) },
                             delete: { requestDelete(task) }
                         )
                         if index < tasks.count - 1 {
