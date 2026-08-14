@@ -78,6 +78,27 @@ final class TaskStore {
         toggleCompletion(of: id, at: .now)
     }
 
+    func updateDueDate(of id: UUID, to dueDate: Date?) {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        let previousTask = tasks[index]
+        guard previousTask.dueDate != dueDate else { return }
+
+        tasks[index].dueDate = dueDate
+        if dueDate == nil {
+            tasks[index].calendarEventIdentifier = nil
+        }
+        guard save() else {
+            tasks[index] = previousTask
+            return
+        }
+
+        if dueDate == nil {
+            removeCalendarEvent(for: previousTask)
+        } else {
+            synchronize(id)
+        }
+    }
+
     func toggleCompletion(of id: UUID, at date: Date) {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
         let previousTask = tasks[index]
@@ -142,6 +163,29 @@ final class TaskStore {
         } catch {
             lastError = "Could not save tasks: \(error.localizedDescription)"
             return false
+        }
+    }
+
+    private func removeCalendarEvent(for task: ScreenieTask) {
+        let id = task.id
+        calendarErrors[id] = nil
+        let previousSync = syncTasks[id]
+        previousSync?.cancel()
+        guard let calendarDelete else {
+            syncTasks[id] = nil
+            return
+        }
+
+        syncTasks[id] = Task { [weak self] in
+            await previousSync?.value
+            guard let self else { return }
+            do {
+                try await calendarDelete(task)
+                calendarErrors[id] = nil
+            } catch {
+                calendarErrors[id] = "Could not remove Apple Calendar event: \(error.localizedDescription)"
+            }
+            syncTasks[id] = nil
         }
     }
 

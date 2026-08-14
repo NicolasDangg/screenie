@@ -458,6 +458,45 @@ final class ScreenSageTests: XCTestCase {
     }
 
     @MainActor
+    func testTaskStoreChangesAndRemovesDeadline() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "tasks.json")
+        let originalDate = date(2026, 8, 18, 10)
+        let changedDate = date(2026, 8, 20, 14)
+        let task = ScreenieTask(title: "Physics", dueDate: originalDate)
+        var synchronizedTasks: [ScreenieTask] = []
+        var deletedTask: ScreenieTask?
+        let store = TaskStore(
+            fileURL: fileURL,
+            calendarDelete: { deletedTask = $0 },
+            calendarSync: { synchronizedTask in
+                synchronizedTasks.append(synchronizedTask)
+                return "event-123"
+            }
+        )
+
+        store.add(task)
+        await waitUntil { store.tasks.first?.calendarEventIdentifier == "event-123" }
+
+        store.updateDueDate(of: task.id, to: changedDate)
+        await waitUntil { synchronizedTasks.last?.dueDate == changedDate }
+        XCTAssertEqual(store.tasks.first?.dueDate, changedDate)
+        XCTAssertEqual(TaskStore(fileURL: fileURL, calendarSync: nil).tasks.first?.dueDate, changedDate)
+
+        store.updateDueDate(of: task.id, to: nil)
+        await waitUntil { deletedTask != nil }
+
+        XCTAssertEqual(deletedTask?.dueDate, changedDate)
+        XCTAssertEqual(deletedTask?.calendarEventIdentifier, "event-123")
+        XCTAssertNil(store.tasks.first?.dueDate)
+        XCTAssertNil(store.tasks.first?.calendarEventIdentifier)
+        let persisted = try XCTUnwrap(TaskStore(fileURL: fileURL, calendarSync: nil).tasks.first)
+        XCTAssertNil(persisted.dueDate)
+        XCTAssertNil(persisted.calendarEventIdentifier)
+    }
+
+    @MainActor
     func testTaskStoreKeepsCorruptFileAndOrdersCompletedTasksNewestFirst() throws {
         let fileURL = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString)
