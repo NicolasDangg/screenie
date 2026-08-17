@@ -29,6 +29,29 @@ struct OverlayView: View {
                 }
 
                 HStack(spacing: 6) {
+                    Button(action: model.toggleScreenshotForNextMessage) {
+                        ZStack {
+                            Circle()
+                                .fill(model.includeScreenshotForNextMessage ? .blue : .clear)
+                            Circle()
+                                .strokeBorder(.primary.opacity(0.34), lineWidth: 0.8)
+                            if model.includeScreenshotForNextMessage {
+                                Image(systemName: "checkmark")
+                                    .font(.caption.weight(.bold))
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 25.2, height: 25.2)
+                    .foregroundStyle(model.includeScreenshotForNextMessage ? .white : .primary)
+                    .opacity(model.canToggleScreenshot ? 1 : 0.45)
+                    .disabled(!model.canToggleScreenshot)
+                    .accessibilityLabel(
+                        model.includeScreenshotForNextMessage ? "Screenshot included" : "Screenshot excluded"
+                    )
+                    .accessibilityValue(model.includeScreenshotForNextMessage ? "On" : "Off")
+                    .accessibilityHint("Toggles whether the next message includes a new screenshot and OCR")
+
                     TextField("Ask about your screen", text: $model.prompt)
                         .textFieldStyle(.plain)
                         .lineLimit(1)

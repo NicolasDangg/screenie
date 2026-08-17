@@ -79,8 +79,8 @@ final class OverlayPanelController {
     }
 
     func startNewChat() {
+        model.finishConversation()
         if isPresented {
-            model.finishConversation()
             setExpanded(false)
         } else {
             show()
@@ -89,8 +89,8 @@ final class OverlayPanelController {
 
     func show() {
         guard !isPresented else { return }
-        model.startNewConversation()
-        setExpanded(false, animated: false)
+        model.prepareForPresentation()
+        setExpanded(model.isExpanded, animated: false)
         isPresented = true
         if !hasBeenPositioned {
             var savedFrame = panel.frame
@@ -122,7 +122,7 @@ final class OverlayPanelController {
     func hide() {
         guard isPresented else { return }
         Self.saveOrigin(panel.frame.origin, in: defaults)
-        model.finishConversation()
+        model.suspendConversation()
         isPresented = false
         animate({ self.panel.animator().alphaValue = 0 }) { [weak self] in
             guard let self, !self.isPresented else { return }

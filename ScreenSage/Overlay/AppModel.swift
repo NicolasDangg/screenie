@@ -17,6 +17,7 @@ final class AppModel {
     var isAddingTaskScheduleToCalendar = false
     var didAddTaskScheduleToCalendar = false
     var isParsingTask = false
+    var includeScreenshotForNextMessage = true
 
     let settings: AppSettings
     let taskStore: TaskStore
@@ -26,11 +27,14 @@ final class AppModel {
     private let mockScheduleResponse: String?
     private let taskParser: @Sendable (String) async throws -> ScreenieTask
     private let taskScheduleCalendarSync: @MainActor (TaskSchedule) async throws -> Void
+    private let conversationGracePeriod: TimeInterval
     private var requestTask: Task<Void, Never>?
     private var scheduleTask: Task<Void, Never>?
     private var scheduleCalendarTask: Task<Void, Never>?
     private var taskParsingTask: Task<Void, Never>?
     private var taskParsingID: UUID?
+    private var conversationExpiryTask: Task<Void, Never>?
+    private var conversationExpiresAt: Date?
 
     init(
         settings: AppSettings,
@@ -43,7 +47,8 @@ final class AppModel {
         },
         taskParser: @escaping @Sendable (String) async throws -> ScreenieTask = {
             try await FoundationModelTaskParser.parse($0)
-        }
+        },
+        conversationGracePeriod: TimeInterval = 60
     ) {
         self.settings = settings
         self.history = history
@@ -52,14 +57,33 @@ final class AppModel {
         self.mockScheduleResponse = mockScheduleResponse
         self.taskScheduleCalendarSync = taskScheduleCalendarSync
         self.taskParser = taskParser
+        self.conversationGracePeriod = conversationGracePeriod
     }
 
     var isExpanded: Bool {
         presentationMode == .tasks || isWorking || !conversation.messages.isEmpty || !errorMessage.isEmpty
     }
 
+    var hasCompletedFirstResponse: Bool {
+        conversation.messages.contains { $0.role == .assistant }
+    }
+
+    var canToggleScreenshot: Bool {
+        hasCompletedFirstResponse && !isWorking
+    }
+
+    nonisolated static func shouldIncludeScreenshot(
+        hasCompletedFirstResponse: Bool,
+        includeScreenshotForNextMessage: Bool
+    ) -> Bool {
+        !hasCompletedFirstResponse || includeScreenshotForNextMessage
+    }
+
     func startNewConversation() {
         requestTask?.cancel()
+        conversationExpiryTask?.cancel()
+        conversationExpiryTask = nil
+        conversationExpiresAt = nil
         cancelTaskParsing()
         prompt = ""
         presentationMode = .chat
@@ -67,7 +91,24 @@ final class AppModel {
         streamingResponse = ""
         errorMessage = ""
         isWorking = false
+        includeScreenshotForNextMessage = true
         presentationID += 1
+    }
+
+    func toggleScreenshotForNextMessage() {
+        guard canToggleScreenshot else { return }
+        includeScreenshotForNextMessage.toggle()
+    }
+
+    func prepareForPresentation() {
+        guard let expiresAt = conversationExpiresAt else { return }
+        guard expiresAt > .now else {
+            startNewConversation()
+            return
+        }
+        conversationExpiryTask?.cancel()
+        conversationExpiryTask = nil
+        conversationExpiresAt = nil
     }
 
     func presentTasks() {
@@ -164,11 +205,34 @@ final class AppModel {
 
     func finishConversation() {
         requestTask?.cancel()
-        if conversation.messages.contains(where: { $0.role == .assistant }) {
-            conversation.updatedAt = .now
-            history.upsert(conversation)
-        }
+        persistConversationIfNeeded()
         startNewConversation()
+    }
+
+    func suspendConversation() {
+        requestTask?.cancel()
+        requestTask = nil
+        isWorking = false
+        streamingResponse = ""
+        persistConversationIfNeeded()
+
+        conversationExpiryTask?.cancel()
+        let conversationID = conversation.id
+        let expiresAt = Date.now.addingTimeInterval(conversationGracePeriod)
+        conversationExpiresAt = expiresAt
+        conversationExpiryTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(max(0, expiresAt.timeIntervalSinceNow)))
+            } catch {
+                return
+            }
+            guard let self,
+                  self.conversation.id == conversationID,
+                  self.conversationExpiresAt == expiresAt else { return }
+            self.conversationExpiryTask = nil
+            self.conversationExpiresAt = nil
+            self.startNewConversation()
+        }
     }
 
     func submit() {
@@ -187,6 +251,11 @@ final class AppModel {
             errorMessage = "Add an API key in Settings before asking about your screen."
             return
         }
+
+        let shouldIncludeScreenshot = Self.shouldIncludeScreenshot(
+            hasCompletedFirstResponse: hasCompletedFirstResponse,
+            includeScreenshotForNextMessage: includeScreenshotForNextMessage
+        )
 
         prompt = ""
         errorMessage = ""
@@ -207,15 +276,17 @@ final class AppModel {
                 if conversation.id == conversationID { isWorking = false }
             }
             do {
-                let context = try await ScreenContextCapture.capture()
+                let context = shouldIncludeScreenshot
+                    ? try await ScreenContextCapture.capture()
+                    : nil
                 var response = ""
                 for try await delta in providerClient.stream(
                     provider: provider,
                     model: model,
                     apiKey: apiKey,
                     messages: requestMessages,
-                    ocrText: context.ocrText,
-                    imageData: context.imageData
+                    ocrText: context?.ocrText ?? "",
+                    imageData: context?.imageData
                 ) {
                     try Task.checkCancellation()
                     guard conversation.id == conversationID else { return }
@@ -255,6 +326,12 @@ final class AppModel {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func persistConversationIfNeeded() {
+        guard conversation.messages.contains(where: { $0.role == .assistant }) else { return }
+        conversation.updatedAt = .now
+        history.upsert(conversation)
     }
 
     private func handleTaskCommand(_ submittedPrompt: String) -> Bool {

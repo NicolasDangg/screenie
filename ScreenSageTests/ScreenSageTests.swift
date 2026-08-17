@@ -178,6 +178,34 @@ final class ScreenSageTests: XCTestCase {
     }
 
     @MainActor
+    func testHiddenConversationResumesWithinGraceAndExpiresAfterGrace() async {
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            mockResponse: "Answer",
+            conversationGracePeriod: 2
+        )
+        let controller = OverlayPanelController(model: model)
+
+        controller.show()
+        model.prompt = "Keep this chat"
+        model.submit()
+        let suspendedID = model.conversation.id
+        model.toggleScreenshotForNextMessage()
+        controller.hide()
+
+        controller.show()
+        XCTAssertEqual(model.conversation.id, suspendedID)
+        XCTAssertFalse(model.includeScreenshotForNextMessage)
+
+        controller.hide()
+        try? await Task.sleep(for: .seconds(2.1))
+        controller.show()
+        XCTAssertNotEqual(model.conversation.id, suspendedID)
+        XCTAssertTrue(model.includeScreenshotForNextMessage)
+    }
+
+    @MainActor
     func testAppRuntimeStartsWithOverlayHidden() {
         let runtime = AppRuntime(taskStore: TaskStore(fileURL: nil, calendarSync: nil))
         runtime.start()
@@ -237,6 +265,43 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(model.conversation.messages.last?.text, "**Answer:** The closure captures `count`.")
         XCTAssertFalse(model.isWorking)
         XCTAssertEqual(model.errorMessage, "")
+    }
+
+    func testScreenshotSelectionAlwaysIncludesFirstRequest() {
+        XCTAssertTrue(AppModel.shouldIncludeScreenshot(
+            hasCompletedFirstResponse: false,
+            includeScreenshotForNextMessage: false
+        ))
+        XCTAssertTrue(AppModel.shouldIncludeScreenshot(
+            hasCompletedFirstResponse: true,
+            includeScreenshotForNextMessage: true
+        ))
+        XCTAssertFalse(AppModel.shouldIncludeScreenshot(
+            hasCompletedFirstResponse: true,
+            includeScreenshotForNextMessage: false
+        ))
+    }
+
+    @MainActor
+    func testScreenshotToggleIsLockedUntilFirstResponseAndResetsForNewChat() {
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            mockResponse: "Answer"
+        )
+
+        XCTAssertTrue(model.includeScreenshotForNextMessage)
+        model.toggleScreenshotForNextMessage()
+        XCTAssertTrue(model.includeScreenshotForNextMessage)
+
+        model.prompt = "First question"
+        model.submit()
+        XCTAssertTrue(model.canToggleScreenshot)
+
+        model.toggleScreenshotForNextMessage()
+        XCTAssertFalse(model.includeScreenshotForNextMessage)
+        model.startNewConversation()
+        XCTAssertTrue(model.includeScreenshotForNextMessage)
     }
 
     func testOpenAIPayloadDisablesStorageAndIncludesBothContexts() throws {

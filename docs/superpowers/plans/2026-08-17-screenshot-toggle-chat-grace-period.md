@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `ScreenSageTests/ScreenSageTests.swift`
 
-- [ ] **Step 1: Add screenshot-selection and toggle-state tests**
+- [x] **Step 1: Add screenshot-selection and toggle-state tests**
 
 Add these tests near the existing `testMockResponseBypassesProviderAndScreenCapture` test:
 
@@ -66,7 +66,7 @@ func testScreenshotToggleIsLockedUntilFirstResponseAndResetsForNewChat() {
 }
 ```
 
-- [ ] **Step 2: Add the hide/resume/expiry regression test**
+- [x] **Step 2: Add the hide/resume/expiry regression test**
 
 Add this asynchronous test near the existing overlay panel tests:
 
@@ -77,7 +77,7 @@ func testHiddenConversationResumesWithinGraceAndExpiresAfterGrace() async {
         settings: AppSettings(),
         taskStore: TaskStore(fileURL: nil, calendarSync: nil),
         mockResponse: "Answer",
-        conversationGracePeriod: 0.05
+        conversationGracePeriod: 2
     )
     let controller = OverlayPanelController(model: model)
 
@@ -93,14 +93,14 @@ func testHiddenConversationResumesWithinGraceAndExpiresAfterGrace() async {
     XCTAssertFalse(model.includeScreenshotForNextMessage)
 
     controller.hide()
-    try? await Task.sleep(for: .milliseconds(100))
+    try? await Task.sleep(for: .seconds(2.1))
     controller.show()
     XCTAssertNotEqual(model.conversation.id, suspendedID)
     XCTAssertTrue(model.includeScreenshotForNextMessage)
 }
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail for the missing feature**
+- [x] **Step 3: Run the tests to verify they fail for the missing feature**
 
 Run:
 
@@ -119,7 +119,7 @@ Expected: compilation fails because `AppModel.shouldIncludeScreenshot`, the scre
 **Files:**
 - Modify: `ScreenSage/Overlay/AppModel.swift`
 
-- [ ] **Step 1: Add the minimal model state and pure selection rule**
+- [x] **Step 1: Add the minimal model state and pure selection rule**
 
 Add the following model members:
 
@@ -144,7 +144,7 @@ nonisolated static func shouldIncludeScreenshot(
 
 Add `conversationGracePeriod: TimeInterval = 60` as the final `init` parameter and store it in a private property. Add private `conversationExpiryTask` and `conversationExpiresAt` properties.
 
-- [ ] **Step 2: Add toggle and lifecycle methods**
+- [x] **Step 2: Add toggle and lifecycle methods**
 
 Implement these methods in `AppModel`:
 
@@ -170,7 +170,7 @@ Add `suspendConversation()` that cancels the active request, stops the working/s
 
 Cancel and clear the expiry task/date and reset `includeScreenshotForNextMessage` to `true` inside `startNewConversation()`.
 
-- [ ] **Step 3: Select optional context in `submit()`**
+- [x] **Step 3: Select optional context in `submit()`**
 
 Before appending the submitted user message, calculate:
 
@@ -191,7 +191,7 @@ let context = shouldIncludeScreenshot
 
 Pass `context?.ocrText ?? ""` and `context?.imageData` to `providerClient.stream`. Leave the existing mock-response branch before capture unchanged so mock mode continues to bypass capture and networking.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -214,7 +214,7 @@ Expected: all three new tests pass.
 - Modify: `ScreenSage/Overlay/OverlayView.swift`
 - Modify: `ScreenSage/Overlay/OverlayPanelController.swift`
 
-- [ ] **Step 1: Add the circular checkbox button**
+- [x] **Step 1: Add the circular checkbox button**
 
 Insert the button before the existing `TextField` in the composer `HStack`. Use the existing `25.2` point control size, a blue filled circle/checkmark when enabled, an outlined circle when disabled, and a plain button style. Keep the current send button and input spacing unchanged.
 
@@ -233,6 +233,7 @@ Button(action: model.toggleScreenshotForNextMessage) {
         }
     }
 }
+.buttonStyle(.plain)
 .frame(width: 25.2, height: 25.2)
 .foregroundStyle(model.includeScreenshotForNextMessage ? .white : .primary)
 .opacity(model.canToggleScreenshot ? 1 : 0.45)
@@ -246,11 +247,11 @@ Button(action: model.toggleScreenshotForNextMessage) {
 
 The conditional image hides the checkmark when unchecked while the explicit accessibility label remains available to assistive technologies. The button remains visible but disabled for the first request and while streaming.
 
-- [ ] **Step 2: Resume or start the correct conversation on panel show**
+- [x] **Step 2: Resume or start the correct conversation on panel show**
 
 In `OverlayPanelController.show()`, replace `model.startNewConversation()` with `model.prepareForPresentation()`. Set the panel height from `model.isExpanded` rather than always collapsing it, so a resumed conversation reopens expanded while a new chat remains collapsed.
 
-- [ ] **Step 3: Suspend instead of clearing on hide**
+- [x] **Step 3: Suspend instead of clearing on hide**
 
 In `OverlayPanelController.hide()`, replace `model.finishConversation()` with `model.suspendConversation()`.
 
@@ -267,7 +268,7 @@ func startNewChat() {
 }
 ```
 
-- [ ] **Step 4: Build and run the UI-focused tests**
+- [x] **Step 4: Build and run the UI-focused tests**
 
 Run:
 
@@ -291,7 +292,7 @@ Expected: both existing UI/lifecycle tests and the new feature tests pass.
 - Verify: `ScreenSage/Overlay/OverlayPanelController.swift`
 - Verify: `ScreenSageTests/ScreenSageTests.swift`
 
-- [ ] **Step 1: Run the complete test suite**
+- [x] **Step 1: Run the complete test suite**
 
 ```bash
 xcodebuild test \
@@ -303,7 +304,7 @@ xcodebuild test \
 
 Expected: `** TEST SUCCEEDED **` with zero failures.
 
-- [ ] **Step 2: Build the app without signing**
+- [x] **Step 2: Build the app without signing**
 
 ```bash
 xcodebuild build \
@@ -315,7 +316,7 @@ xcodebuild build \
 
 Expected: `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 3: Check the diff and preserve unrelated work**
+- [x] **Step 3: Check the diff and preserve unrelated work**
 
 ```bash
 git diff --check
@@ -325,7 +326,7 @@ git diff -- ScreenSage/Overlay/AppModel.swift ScreenSage/Overlay/OverlayView.swi
 
 Confirm the diff contains only screenshot-toggle/grace-period behavior plus its tests; do not stage the pre-existing `AssistantResponseText.swift` changes unless they were already staged by the user.
 
-- [ ] **Step 4: Visually inspect the installed app**
+- [x] **Step 4: Visually inspect the installed app**
 
 Run `./scripts/install.sh`, launch once with `SCREENIE_MOCK_RESPONSE` set, and verify manually:
 
@@ -335,7 +336,7 @@ Run `./scripts/install.sh`, launch once with `SCREENIE_MOCK_RESPONSE` set, and v
 4. Checked subsequent submission uses capture/OCR; unchecked subsequent submission does not.
 5. Hiding and reopening within 60 seconds restores the same chat; reopening after expiry starts a checked, empty chat.
 
-- [ ] **Step 5: Commit the implementation**
+- [x] **Step 5: Commit the implementation**
 
 ```bash
 git add ScreenSage/Overlay/AppModel.swift ScreenSage/Overlay/OverlayView.swift ScreenSage/Overlay/OverlayPanelController.swift ScreenSageTests/ScreenSageTests.swift
