@@ -82,6 +82,19 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(OverlayLayout.collapsedHeight, 37.8)
         XCTAssertEqual(OverlayLayout.expandedHeight, 378)
         XCTAssertEqual(OverlayLayout.taskHeight, 480)
+        XCTAssertEqual(OverlayLayout.controlDiameter, 25.2)
+        XCTAssertEqual(OverlayLayout.cornerRadius, OverlayLayout.collapsedHeight / 2)
+    }
+
+    func testOverlayLoadingLabelMatchesScreenContext() {
+        XCTAssertEqual(
+            OverlayAnswerView.loadingLabel(includesScreenContext: true),
+            "Reading screen…"
+        )
+        XCTAssertEqual(
+            OverlayAnswerView.loadingLabel(includesScreenContext: false),
+            "Thinking..."
+        )
     }
 
     @MainActor

@@ -5,6 +5,11 @@ struct OverlayAnswerView: View {
     let streamingResponse: String
     let errorMessage: String
     let isWorking: Bool
+    let includesScreenContext: Bool
+
+    static func loadingLabel(includesScreenContext: Bool) -> String {
+        includesScreenContext ? "Reading screen…" : "Thinking..."
+    }
 
     var body: some View {
         ScrollView {
@@ -31,12 +36,18 @@ struct OverlayAnswerView: View {
                 }
 
                 if !streamingResponse.isEmpty {
-                    AssistantResponseText(text: streamingResponse)
+                    Text(streamingResponse)
+                        .font(.system(size: 17))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if isWorking {
-                    ProgressView("Reading screen…")
-                        .controlSize(.small)
+                    let label = Self.loadingLabel(includesScreenContext: includesScreenContext)
+                    if includesScreenContext {
+                        ProgressView(label)
+                            .controlSize(.small)
+                    } else {
+                        ThinkingIndicator(label: label)
+                    }
                 }
 
                 if !errorMessage.isEmpty {
@@ -56,5 +67,37 @@ struct OverlayAnswerView: View {
             interpretedSyntax: .inlineOnlyPreservingWhitespace
         )
         return Text((try? AttributedString(markdown: text, options: options)) ?? AttributedString(text))
+    }
+}
+
+private struct ThinkingIndicator: View {
+    let label: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            if reduceMotion {
+                Text(label)
+                    .foregroundStyle(.secondary)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                    let phase = context.date.timeIntervalSinceReferenceDate
+                        .truncatingRemainder(dividingBy: 1.4) / 1.4
+                    let start = CGFloat(phase * 2 - 1)
+
+                    Text(label)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.secondary, .primary, .secondary],
+                                startPoint: UnitPoint(x: start, y: 0.5),
+                                endPoint: UnitPoint(x: start + 1, y: 0.5)
+                            )
+                        )
+                }
+            }
+        }
+        .font(.callout.weight(.medium))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Thinking")
     }
 }

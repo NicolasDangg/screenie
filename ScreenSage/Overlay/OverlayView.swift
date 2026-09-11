@@ -19,12 +19,32 @@ struct OverlayView: View {
                 TaskManagerView(model: model)
             } else {
                 if isExpanded {
-                    OverlayAnswerView(
-                        messages: model.conversation.messages,
-                        streamingResponse: model.streamingResponse,
-                        errorMessage: model.errorMessage,
-                        isWorking: model.isWorking
-                    )
+                    ZStack(alignment: .topTrailing) {
+                        OverlayAnswerView(
+                            messages: model.conversation.messages,
+                            streamingResponse: model.streamingResponse,
+                            errorMessage: model.errorMessage,
+                            isWorking: model.isWorking,
+                            includesScreenContext: model.includeScreenshotForNextMessage
+                        )
+                        .padding(.top, OverlayLayout.controlDiameter + 8)
+
+                        Button("New Chat", systemImage: "plus", action: model.startNewConversation)
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(
+                                width: OverlayLayout.controlDiameter,
+                                height: OverlayLayout.controlDiameter
+                            )
+                            .background(.primary.opacity(0.08), in: .circle)
+                            .overlay {
+                                Circle().strokeBorder(.primary.opacity(0.2), lineWidth: 0.8)
+                            }
+                            .help("New Chat")
+                            .padding(.top, 8)
+                            .padding(.trailing, 14.1)
+                    }
                     Divider().opacity(0.35)
                 }
 
@@ -42,7 +62,10 @@ struct OverlayView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .frame(width: 25.2, height: 25.2)
+                    .frame(
+                        width: OverlayLayout.controlDiameter,
+                        height: OverlayLayout.controlDiameter
+                    )
                     .foregroundStyle(model.includeScreenshotForNextMessage ? .white : .primary)
                     .opacity(model.canToggleScreenshot ? 1 : 0.45)
                     .disabled(!model.canToggleScreenshot)
@@ -61,7 +84,10 @@ struct OverlayView: View {
                     Button("Send", systemImage: "arrow.up", action: model.submit)
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
-                        .frame(width: 25.2, height: 25.2)
+                        .frame(
+                            width: OverlayLayout.controlDiameter,
+                            height: OverlayLayout.controlDiameter
+                        )
                         .background(.blue, in: .circle)
                         .foregroundStyle(.white)
                         .opacity(model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
@@ -77,9 +103,9 @@ struct OverlayView: View {
         )
         .background(PanelDragArea())
         .background { LiveBackdropView().allowsHitTesting(false) }
-        .clipShape(.rect(cornerRadius: isExpanded ? 20 : OverlayLayout.collapsedHeight / 2))
+        .clipShape(.rect(cornerRadius: OverlayLayout.cornerRadius))
         .overlay {
-            RoundedRectangle(cornerRadius: isExpanded ? 20 : OverlayLayout.collapsedHeight / 2)
+            RoundedRectangle(cornerRadius: OverlayLayout.cornerRadius)
                 .strokeBorder(
                     LinearGradient(
                         colors: [.white.opacity(0.55), .primary.opacity(0.12), .white.opacity(0.24)],
