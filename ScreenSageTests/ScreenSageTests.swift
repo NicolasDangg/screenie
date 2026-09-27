@@ -65,6 +65,21 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(AIProvider.openRouter.defaultModel, "openai/gpt-5.6-luna")
     }
 
+    func testOpenRouterCatalogKeepsSortedVisionModels() throws {
+        let json = """
+        {"data": [
+          {"id": "b/vision", "name": "Zeta Vision", "architecture": {"input_modalities": ["text", "image"]}},
+          {"id": "a/text", "name": "Alpha Text", "architecture": {"input_modalities": ["text"]}},
+          {"id": "c/vision", "name": "Beta Vision", "architecture": {"input_modalities": ["image", "text"]}},
+          {"id": "d/unknown"}
+        ]}
+        """
+
+        let models = try OpenRouterModelCatalog.decode(Data(json.utf8))
+
+        XCTAssertEqual(models.map(\.id), ["c/vision", "b/vision"])
+    }
+
     @MainActor
     func testAPIKeyIsStoredInLocalPreferences() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
