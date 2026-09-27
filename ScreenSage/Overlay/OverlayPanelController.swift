@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+enum OverlayResizeHandle {
+    case left, right, topLeft, topRight, bottomLeft, bottomRight
+}
+
 @MainActor
 final class OverlayPanelController {
     private enum PositionKeys {
@@ -12,6 +16,7 @@ final class OverlayPanelController {
     private let panel: KeyablePanel
     private let defaults: UserDefaults
     private var hasBeenPositioned = false
+    private var resizeStart: (frame: NSRect, mouse: NSPoint)?
     private(set) var isPresented = false
 
     init(model: AppModel, defaults: UserDefaults = .standard) {
@@ -21,7 +26,7 @@ final class OverlayPanelController {
             contentRect: NSRect(
                 x: 0,
                 y: 0,
-                width: OverlayLayout.width,
+                width: OverlayLayout.collapsedWidth,
                 height: OverlayLayout.collapsedHeight
             ),
             styleMask: [.borderless],
@@ -41,7 +46,9 @@ final class OverlayPanelController {
         panel.contentView = NSHostingView(rootView: OverlayView(
             model: model,
             close: { [weak self] in self?.hide() },
-            setExpanded: { [weak self] in self?.setExpanded($0) }
+            setExpanded: { [weak self] in self?.setExpanded($0) },
+            resize: { [weak self] handle, location in self?.resize(handle, at: location) },
+            endResize: { [weak self] in self?.resizeStart = nil }
         ))
     }
 
@@ -56,6 +63,17 @@ final class OverlayPanelController {
         return NSPoint(
             x: defaults.double(forKey: PositionKeys.x),
             y: defaults.double(forKey: PositionKeys.y)
+        )
+    }
+
+    static func origin(on visibleFrame: NSRect, panelSize: NSSize, previousOrigin: NSPoint?) -> NSPoint {
+        if let previousOrigin,
+           visibleFrame.contains(NSRect(origin: previousOrigin, size: panelSize)) {
+            return previousOrigin
+        }
+        return NSPoint(
+            x: visibleFrame.midX - panelSize.width / 2,
+            y: visibleFrame.minY + 64
         )
     }
 
@@ -92,6 +110,18 @@ final class OverlayPanelController {
         model.prepareForPresentation()
         setExpanded(model.isExpanded, animated: false)
         isPresented = true
+        let pointerScreen = NSScreen.screens.first {
+            NSMouseInRect(NSEvent.mouseLocation, $0.frame, false)
+        } ?? NSScreen.main
+        if model.settings.followFocusedDisplay, let visibleFrame = pointerScreen?.visibleFrame {
+            let previousOrigin = hasBeenPositioned ? panel.frame.origin : Self.savedOrigin(in: defaults)
+            panel.setFrameOrigin(Self.origin(
+                on: visibleFrame,
+                panelSize: panel.frame.size,
+                previousOrigin: previousOrigin
+            ))
+            hasBeenPositioned = true
+        }
         if !hasBeenPositioned {
             var savedFrame = panel.frame
             if let savedOrigin = Self.savedOrigin(in: defaults) {
@@ -102,9 +132,7 @@ final class OverlayPanelController {
                 }
             }
             if !hasBeenPositioned {
-                let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
-                    ?? NSScreen.main
-                if let visibleFrame = screen?.visibleFrame {
+                if let visibleFrame = pointerScreen?.visibleFrame {
                     panel.setFrameOrigin(NSPoint(
                         x: visibleFrame.midX - panel.frame.width / 2,
                         y: visibleFrame.minY + 64
@@ -121,6 +149,7 @@ final class OverlayPanelController {
 
     func hide() {
         guard isPresented else { return }
+        resizeStart = nil
         Self.saveOrigin(panel.frame.origin, in: defaults)
         model.suspendConversation()
         isPresented = false
@@ -132,14 +161,22 @@ final class OverlayPanelController {
     }
 
     private func setExpanded(_ expanded: Bool, animated: Bool = true) {
+        let width = model.presentationMode == .tasks ? OverlayLayout.width
+            : (expanded ? model.expandedChatSize.width : OverlayLayout.collapsedWidth)
         let height = model.presentationMode == .tasks
             ? OverlayLayout.taskHeight
-            : (expanded ? OverlayLayout.expandedHeight : OverlayLayout.collapsedHeight)
-        guard panel.frame.height != height else { return }
+            : (expanded ? model.expandedChatSize.height : OverlayLayout.collapsedHeight)
+        guard panel.frame.width != width || panel.frame.height != height else { return }
         var frame = panel.frame
+        let centerX = frame.midX
+        frame.size.width = width
         frame.size.height = height
-        if let visibleFrame = panel.screen?.visibleFrame, frame.maxY > visibleFrame.maxY - 12 {
-            frame.origin.y = visibleFrame.maxY - height - 12
+        frame.origin.x = centerX - width / 2
+        if let visibleFrame = panel.screen?.visibleFrame {
+            frame.origin.x = min(max(frame.origin.x, visibleFrame.minX + 12), visibleFrame.maxX - width - 12)
+            if frame.maxY > visibleFrame.maxY - 12 {
+                frame.origin.y = visibleFrame.maxY - height - 12
+            }
         }
         if animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NSAnimationContext.runAnimationGroup { context in
@@ -150,6 +187,46 @@ final class OverlayPanelController {
         } else {
             panel.setFrame(frame, display: true)
         }
+    }
+
+    func resize(_ handle: OverlayResizeHandle, at location: CGPoint) {
+        guard isPresented, model.presentationMode == .chat, model.isExpanded else { return }
+        // The handle moves with the panel, so measure drag positions in screen coordinates.
+        let mouse = NSPoint(x: panel.frame.minX + location.x, y: panel.frame.maxY - location.y)
+        if resizeStart == nil { resizeStart = (panel.frame, mouse) }
+        guard let start = resizeStart, let visibleFrame = panel.screen?.visibleFrame else { return }
+        let translation = CGSize(width: mouse.x - start.mouse.x, height: start.mouse.y - mouse.y)
+        let frame = Self.resizedFrame(start.frame, handle: handle, translation: translation, within: visibleFrame)
+        panel.setFrame(frame, display: true)
+        model.expandedChatSize = frame.size
+    }
+
+    static func resizedFrame(
+        _ frame: NSRect,
+        handle: OverlayResizeHandle,
+        translation: CGSize,
+        within visibleFrame: NSRect
+    ) -> NSRect {
+        let inset = 12.0
+        var left = frame.minX
+        var right = frame.maxX
+        var bottom = frame.minY
+        var top = frame.maxY
+        switch handle {
+        case .left, .topLeft, .bottomLeft:
+            left = min(max(left + translation.width, visibleFrame.minX + inset), right - OverlayLayout.minimumExpandedWidth)
+        case .right, .topRight, .bottomRight:
+            right = max(min(right + translation.width, visibleFrame.maxX - inset), left + OverlayLayout.minimumExpandedWidth)
+        }
+        switch handle {
+        case .topLeft, .topRight:
+            top = max(min(top - translation.height, visibleFrame.maxY - inset), bottom + OverlayLayout.minimumExpandedHeight)
+        case .bottomLeft, .bottomRight:
+            bottom = min(max(bottom - translation.height, visibleFrame.minY + inset), top - OverlayLayout.minimumExpandedHeight)
+        case .left, .right:
+            break
+        }
+        return NSRect(x: left, y: bottom, width: right - left, height: top - bottom)
     }
 
     private func animate(

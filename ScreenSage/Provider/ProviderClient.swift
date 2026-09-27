@@ -1,5 +1,29 @@
 import Foundation
 
+struct StreamingDeltaBuffer {
+    private let interval: Duration
+    private var lastYield: ContinuousClock.Instant
+    private var pending = ""
+
+    init(now: ContinuousClock.Instant, interval: Duration = .milliseconds(50)) {
+        self.interval = interval
+        lastYield = now
+    }
+
+    mutating func append(_ delta: String, now: ContinuousClock.Instant) -> String? {
+        pending += delta
+        guard lastYield.duration(to: now) >= interval else { return nil }
+        lastYield = now
+        return flush()
+    }
+
+    mutating func flush() -> String? {
+        guard !pending.isEmpty else { return nil }
+        defer { pending = "" }
+        return pending
+    }
+}
+
 struct ProviderClient: Sendable {
     func taskSchedule(
         model: String,
@@ -31,6 +55,8 @@ struct ProviderClient: Sendable {
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
+                let clock = ContinuousClock()
+                var buffer = StreamingDeltaBuffer(now: clock.now)
                 do {
                     var request = URLRequest(url: provider.endpoint)
                     request.httpMethod = "POST"
@@ -55,12 +81,19 @@ struct ProviderClient: Sendable {
                     for try await line in bytes.lines {
                         guard line.hasPrefix("data:") else { continue }
                         let dataLine = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
-                        if let delta = SSEDecoder.delta(from: dataLine, provider: provider) {
-                            continuation.yield(delta)
+                        if let delta = SSEDecoder.delta(from: dataLine, provider: provider),
+                           let chunk = buffer.append(delta, now: clock.now) {
+                            continuation.yield(chunk)
                         }
+                    }
+                    if let chunk = buffer.flush() {
+                        continuation.yield(chunk)
                     }
                     continuation.finish()
                 } catch {
+                    if let chunk = buffer.flush() {
+                        continuation.yield(chunk)
+                    }
                     continuation.finish(throwing: error)
                 }
             }

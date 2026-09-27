@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct OverlayAnswerView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let messages: [ChatMessage]
     let streamingResponse: String
     let errorMessage: String
@@ -40,6 +41,7 @@ struct OverlayAnswerView: View {
                         .font(.system(size: 17))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity)
                 } else if isWorking {
                     let label = Self.loadingLabel(includesScreenContext: includesScreenContext)
                     if includesScreenContext {
@@ -57,6 +59,7 @@ struct OverlayAnswerView: View {
                 }
             }
             .padding(14)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: streamingResponse.isEmpty)
         }
         .defaultScrollAnchor(.bottom)
         .scrollIndicators(.hidden)

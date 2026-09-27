@@ -18,6 +18,8 @@ final class AppModel {
     var didAddTaskScheduleToCalendar = false
     var isParsingTask = false
     var includeScreenshotForNextMessage = true
+    var attachedScreenshot: Data?
+    var expandedChatSize = CGSize(width: OverlayLayout.collapsedWidth, height: OverlayLayout.expandedHeight)
 
     let settings: AppSettings
     let taskStore: TaskStore
@@ -92,6 +94,7 @@ final class AppModel {
         errorMessage = ""
         isWorking = false
         includeScreenshotForNextMessage = true
+        attachedScreenshot = nil
         presentationID += 1
     }
 
@@ -269,6 +272,7 @@ final class AppModel {
         let provider = settings.provider
         let model = settings.model
         let apiKey = settings.apiKey
+        attachedScreenshot = nil
 
         requestTask?.cancel()
         requestTask = Task {
@@ -279,6 +283,8 @@ final class AppModel {
                 let context = shouldIncludeScreenshot
                     ? try await ScreenContextCapture.capture()
                     : nil
+                guard conversation.id == conversationID else { return }
+                attachedScreenshot = context?.imageData
                 var response = ""
                 for try await delta in providerClient.stream(
                     provider: provider,

@@ -77,13 +77,33 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(settings.savedMessage, "API key saved locally")
     }
 
-    func testOverlayUsesAdaptiveBarDimensions() {
-        XCTAssertEqual(OverlayLayout.width, 304)
-        XCTAssertEqual(OverlayLayout.collapsedHeight, 37.8)
-        XCTAssertEqual(OverlayLayout.expandedHeight, 378)
+    func testOverlayUsesChatComposerDimensions() {
+        XCTAssertEqual(OverlayLayout.width, 560)
+        XCTAssertEqual(OverlayLayout.collapsedWidth, 320)
+        XCTAssertEqual(OverlayLayout.collapsedHeight, 80)
+        XCTAssertEqual(OverlayLayout.attachedComposerHeight, 110)
+        XCTAssertEqual(OverlayLayout.expandedHeight, 530)
         XCTAssertEqual(OverlayLayout.taskHeight, 480)
         XCTAssertEqual(OverlayLayout.controlDiameter, 25.2)
-        XCTAssertEqual(OverlayLayout.cornerRadius, OverlayLayout.collapsedHeight / 2)
+        XCTAssertEqual(OverlayLayout.cornerRadius, 22)
+    }
+
+    @MainActor
+    func testDisplayFocusPreferenceDefaultsOnAndPersists() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertTrue(settings.followFocusedDisplay)
+
+        settings.followFocusedDisplay = false
+        XCTAssertFalse(AppSettings(defaults: defaults).followFocusedDisplay)
+    }
+
+    func testOpenRouterCatalogKeepsScreenshotChatModels() throws {
+        let vision = try JSONDecoder().decode(OpenRouterModel.self, from: Data(#"{"id":"vendor/vision","name":"Vision","architecture":{"input_modalities":["text","image"],"output_modalities":["text"]}}"#.utf8))
+        let textOnly = try JSONDecoder().decode(OpenRouterModel.self, from: Data(#"{"id":"vendor/text","name":"Text","architecture":{"input_modalities":["text"],"output_modalities":["text"]}}"#.utf8))
+
+        XCTAssertTrue(vision.supportsScreenChat)
+        XCTAssertFalse(textOnly.supportsScreenChat)
     }
 
     func testOverlayLoadingLabelMatchesScreenContext() {
@@ -104,6 +124,28 @@ final class ScreenSageTests: XCTestCase {
 
         XCTAssertEqual(response.text, source)
         _ = response.body
+    }
+
+    @MainActor
+    func testStreamingResponseAvoidsLaTeXRendererUntilCompletion() {
+        let body = OverlayAnswerView(
+            messages: [],
+            streamingResponse: #"Still streaming \(x^2\)"#,
+            errorMessage: "",
+            isWorking: true,
+            includesScreenContext: true
+        ).body
+
+        XCTAssertFalse(containsAssistantResponseText(in: body))
+    }
+
+    func testAssistantResponseNormalizesBoxCommandsForMathJax() {
+        let response = AssistantResponseText(text: #"\[\boxed{x=-2}\] and \[\fbox{x=-3}\]"#)
+
+        XCTAssertEqual(
+            response.renderableText,
+            #"\[\enclose{box}{x=-2}\] and \[\enclose{box}{x=-3}\]"#
+        )
     }
 
     func testGlobalShortcutIsOptionSpace() {
@@ -139,6 +181,14 @@ final class ScreenSageTests: XCTestCase {
     }
 
     @MainActor
+    func testUnexpectedTerminationIsCancelledForMenuBarOnlyApp() {
+        let delegate = AppDelegate()
+
+        XCTAssertEqual(delegate.applicationShouldTerminate(NSApp), .terminateCancel)
+        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApp))
+    }
+
+    @MainActor
     func testOverlayPositionRoundTrip() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let origin = NSPoint(x: -420.5, y: 180.25)
@@ -146,6 +196,117 @@ final class ScreenSageTests: XCTestCase {
         OverlayPanelController.saveOrigin(origin, in: defaults)
 
         XCTAssertEqual(OverlayPanelController.savedOrigin(in: defaults), origin)
+    }
+
+    @MainActor
+    func testOverlayOpensOnPointerDisplayWhenFocusIsEnabled() throws {
+        let settings = AppSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let controller = OverlayPanelController(model: AppModel(
+            settings: settings,
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+        ))
+        let screen = try XCTUnwrap(
+            NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+                ?? NSScreen.main
+        )
+
+        controller.show()
+        defer { controller.hide() }
+        let panel = try XCTUnwrap(NSApp.keyWindow as? KeyablePanel)
+
+        XCTAssertTrue(screen.visibleFrame.contains(panel.frame))
+    }
+
+    @MainActor
+    func testOverlayMovesToAnotherDisplayWhenFocusChanges() {
+        let firstDisplay = NSRect(x: 0, y: 0, width: 1600, height: 900)
+        let secondDisplay = NSRect(x: 1600, y: 0, width: 1600, height: 900)
+        let panelSize = NSSize(width: OverlayLayout.collapsedWidth, height: OverlayLayout.collapsedHeight)
+        let previousOrigin = NSPoint(x: 520, y: 64)
+
+        XCTAssertEqual(
+            OverlayPanelController.origin(
+                on: secondDisplay,
+                panelSize: panelSize,
+                previousOrigin: previousOrigin
+            ),
+            NSPoint(x: 2240, y: 64)
+        )
+        XCTAssertEqual(
+            OverlayPanelController.origin(
+                on: firstDisplay,
+                panelSize: panelSize,
+                previousOrigin: previousOrigin
+            ),
+            previousOrigin
+        )
+    }
+
+    @MainActor
+    func testOverlayResizeGeometry() {
+        let frame = NSRect(x: 100, y: 100, width: 560, height: 590)
+        let screen = NSRect(x: 0, y: 0, width: 1200, height: 900)
+
+        XCTAssertEqual(
+            OverlayPanelController.resizedFrame(frame, handle: .left,
+                                                translation: CGSize(width: 50, height: 0), within: screen),
+            NSRect(x: 150, y: 100, width: 510, height: 590)
+        )
+        XCTAssertEqual(
+            OverlayPanelController.resizedFrame(frame, handle: .right,
+                                                translation: CGSize(width: 100, height: 0), within: screen),
+            NSRect(x: 100, y: 100, width: 660, height: 590)
+        )
+        XCTAssertEqual(
+            OverlayPanelController.resizedFrame(frame, handle: .topLeft,
+                                                translation: CGSize(width: 50, height: -80), within: screen),
+            NSRect(x: 150, y: 100, width: 510, height: 670)
+        )
+        XCTAssertEqual(
+            OverlayPanelController.resizedFrame(frame, handle: .bottomRight,
+                                                translation: CGSize(width: 100, height: -120), within: screen),
+            NSRect(x: 100, y: 220, width: 660, height: 470)
+        )
+        XCTAssertEqual(
+            OverlayPanelController.resizedFrame(frame, handle: .bottomLeft,
+                                                translation: CGSize(width: 900, height: 900), within: screen),
+            NSRect(x: 340, y: 12, width: 320, height: 678)
+        )
+        XCTAssertEqual(
+            OverlayPanelController.resizedFrame(frame, handle: .topRight,
+                                                translation: CGSize(width: 900, height: 900), within: screen),
+            NSRect(x: 100, y: 100, width: 1088, height: 300)
+        )
+    }
+
+    @MainActor
+    func testOverlayResizeTracksScreenPointerWithoutFeedback() throws {
+        let existingPanels = Set(NSApp.windows.compactMap { $0 as? KeyablePanel }.map { ObjectIdentifier($0) })
+        let model = AppModel(
+            settings: AppSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            mockResponse: "Response"
+        )
+        let controller = OverlayPanelController(model: model)
+        model.prompt = "Question"
+        model.submit()
+        controller.show()
+        defer { controller.hide() }
+
+        let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? KeyablePanel }
+            .first { !existingPanels.contains(ObjectIdentifier($0)) })
+        let original = panel.frame
+        XCTAssertEqual(original.width, CGFloat(OverlayLayout.collapsedWidth))
+        XCTAssertEqual(original.height, CGFloat(OverlayLayout.expandedHeight))
+        let local = CGPoint(x: 4, y: original.height / 2)
+        controller.resize(.left, at: local)
+        controller.resize(.left, at: CGPoint(x: local.x - 45, y: local.y))
+        let resized = panel.frame
+
+        XCTAssertEqual(resized.maxX, original.maxX)
+        XCTAssertEqual(resized.width, original.width + 45)
+        controller.resize(.left, at: local)
+        XCTAssertEqual(panel.frame, resized)
     }
 
     @MainActor
@@ -178,6 +339,7 @@ final class ScreenSageTests: XCTestCase {
 
     @MainActor
     func testOverlayPanelTogglesPresentedState() {
+        let existingPanels = Set(NSApp.windows.compactMap { $0 as? KeyablePanel }.map { ObjectIdentifier($0) })
         let controller = OverlayPanelController(model: AppModel(
             settings: AppSettings(),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil)
@@ -186,8 +348,33 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertFalse(controller.isPresented)
         controller.toggle()
         XCTAssertTrue(controller.isPresented)
+        XCTAssertEqual(
+            NSApp.windows.compactMap { $0 as? KeyablePanel }
+                .first { !existingPanels.contains(ObjectIdentifier($0)) }?.frame.width,
+            CGFloat(OverlayLayout.collapsedWidth)
+        )
         controller.toggle()
         XCTAssertFalse(controller.isPresented)
+    }
+
+    @MainActor
+    func testTaskScreenKeepsFullWidthAndNewChatReturnsToCompactBar() throws {
+        let existingPanels = Set(NSApp.windows.compactMap { $0 as? KeyablePanel }.map { ObjectIdentifier($0) })
+        let controller = OverlayPanelController(model: AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+        ))
+
+        controller.showTasks()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.7))
+        let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? KeyablePanel }
+            .first { !existingPanels.contains(ObjectIdentifier($0)) })
+        XCTAssertEqual(panel.frame.width, CGFloat(OverlayLayout.width))
+
+        controller.startNewChat()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.7))
+        XCTAssertEqual(panel.frame.width, CGFloat(OverlayLayout.collapsedWidth))
+        controller.hide()
     }
 
     @MainActor
@@ -250,6 +437,7 @@ final class ScreenSageTests: XCTestCase {
         )
         model.streamingResponse = "Partial"
         model.errorMessage = "Error"
+        model.attachedScreenshot = Data([1, 2, 3])
 
         model.startNewConversation()
 
@@ -258,6 +446,7 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertTrue(model.conversation.messages.isEmpty)
         XCTAssertEqual(model.streamingResponse, "")
         XCTAssertEqual(model.errorMessage, "")
+        XCTAssertNil(model.attachedScreenshot)
     }
 
     @MainActor
@@ -357,6 +546,22 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(SSEDecoder.delta(from: openAI, provider: .openAI), "Hello")
         XCTAssertEqual(SSEDecoder.delta(from: openRouter, provider: .openRouter), "World")
         XCTAssertNil(SSEDecoder.delta(from: "[DONE]", provider: .openAI))
+    }
+
+    func testStreamingDeltaBufferCoalescesRapidUpdatesWithoutLosingText() {
+        let clock = ContinuousClock()
+        let start = clock.now
+        var buffer = StreamingDeltaBuffer(now: start)
+
+        XCTAssertNil(buffer.append("Hel", now: start))
+        XCTAssertNil(buffer.append("lo", now: start.advanced(by: .milliseconds(49))))
+        XCTAssertEqual(
+            buffer.append("!", now: start.advanced(by: .milliseconds(50))),
+            "Hello!"
+        )
+        XCTAssertNil(buffer.append(" Bye", now: start.advanced(by: .milliseconds(51))))
+        XCTAssertEqual(buffer.flush(), " Bye")
+        XCTAssertNil(buffer.flush())
     }
 
     func testTaskParserReadsSampleNaturalLanguageEntry() throws {
@@ -941,5 +1146,13 @@ final class ScreenSageTests: XCTestCase {
         settings.provider = .openAI
 
         XCTAssertEqual(settings.apiKey(for: .openRouter), "router-key")
+    }
+
+    private func containsAssistantResponseText(in value: Any, depth: Int = 0) -> Bool {
+        guard depth < 20 else { return false }
+        if value is AssistantResponseText { return true }
+        return Mirror(reflecting: value).children.contains {
+            containsAssistantResponseText(in: $0.value, depth: depth + 1)
+        }
     }
 }

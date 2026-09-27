@@ -9,6 +9,7 @@ final class AppSettings {
     private enum Keys {
         static let provider = "provider"
         static let model = "model"
+        static let followFocusedDisplay = "followFocusedDisplay"
 
         static func apiKey(for provider: AIProvider) -> String {
             "apiKey.\(provider.rawValue)"
@@ -27,6 +28,9 @@ final class AppSettings {
     var model: String {
         didSet { defaults.set(model, forKey: Keys.model) }
     }
+    var followFocusedDisplay: Bool {
+        didSet { defaults.set(followFocusedDisplay, forKey: Keys.followFocusedDisplay) }
+    }
     var apiKey: String
     var savedMessage = ""
 
@@ -36,6 +40,7 @@ final class AppSettings {
         let selectedProvider = AIProvider(rawValue: rawProvider) ?? Self.defaultProvider
         provider = selectedProvider
         model = defaults.string(forKey: Keys.model) ?? selectedProvider.defaultModel
+        followFocusedDisplay = defaults.object(forKey: Keys.followFocusedDisplay) as? Bool ?? true
         apiKey = defaults.string(forKey: Keys.apiKey(for: selectedProvider)) ?? ""
     }
 

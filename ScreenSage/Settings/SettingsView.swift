@@ -11,6 +11,7 @@ struct SettingsView: View {
                 }
             }
             TextField("Model", text: $settings.model)
+            Toggle("Open on display under pointer", isOn: $settings.followFocusedDisplay)
             SecureField("API key", text: $settings.apiKey)
             HStack {
                 Button("Save API Key", action: settings.saveAPIKey)
