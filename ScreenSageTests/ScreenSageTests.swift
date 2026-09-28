@@ -65,6 +65,29 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(AIProvider.openRouter.defaultModel, "openai/gpt-5.6-luna")
     }
 
+    func testUpdaterComparesDottedVersions() {
+        XCTAssertTrue(AppRelease.isVersion("v0.4", newerThan: "0.3"))
+        XCTAssertTrue(AppRelease.isVersion("0.10", newerThan: "0.9"))
+        XCTAssertTrue(AppRelease.isVersion("1.0.1", newerThan: "1.0"))
+        XCTAssertFalse(AppRelease.isVersion("v0.4", newerThan: "0.4"))
+        XCTAssertFalse(AppRelease.isVersion("0.3", newerThan: "0.4"))
+    }
+
+    func testUpdaterPicksMacOSZipFromLatestRelease() throws {
+        let json = """
+        {"tag_name": "v0.4", "body": "Notes", "html_url": "https://github.com/NicolasDangg/screenie/releases/tag/v0.4",
+         "assets": [
+           {"name": "checksums.txt", "browser_download_url": "https://example.com/checksums.txt"},
+           {"name": "screenie-0.4-macos.zip", "browser_download_url": "https://example.com/screenie-0.4-macos.zip"}
+         ]}
+        """
+
+        let release = try AppRelease.decode(Data(json.utf8))
+
+        XCTAssertEqual(release.version, "0.4")
+        XCTAssertEqual(release.downloadURL.lastPathComponent, "screenie-0.4-macos.zip")
+    }
+
     func testResponseSplitsFencedCodeBlocks() {
         let text = "Use a stack.\n\n```python\ndef push(item):\n    stack.append(item)\n```\nDone."
 

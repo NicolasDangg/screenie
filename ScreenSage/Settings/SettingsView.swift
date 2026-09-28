@@ -19,6 +19,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             PermissionSettingsView()
+            UpdateSettingsView(updater: AppUpdater.shared)
             Text("Your key is stored in local app preferences. Screenshots and OCR text are transient request context and are never saved. Prompt and response text is stored locally in Application Support for History.")
                 .foregroundStyle(.secondary)
         }
