@@ -116,6 +116,7 @@ final class AppUpdater {
             let (zip, _) = try await URLSession.shared.download(from: release.downloadURL)
             let staging = FileManager.default.temporaryDirectory
                 .appending(path: "screenie-update-\(UUID().uuidString)", directoryHint: .isDirectory)
+            defer { try? FileManager.default.removeItem(at: zip) }
             try await Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, staging.path])
 
             let newApp = staging.appending(path: installedApp.lastPathComponent)
@@ -131,7 +132,7 @@ final class AppUpdater {
             try? FileManager.default.removeItem(at: staging)
 
             try Self.relaunch(replacing: installedApp, with: pending)
-            (NSApp.delegate as? AppDelegate)?.requestTermination()
+            AppDelegate.shared?.requestTermination()
         } catch {
             state = .failed(error.localizedDescription)
         }

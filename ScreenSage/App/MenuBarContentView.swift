@@ -13,7 +13,7 @@ struct MenuBarContentView: View {
         SettingsLink { Text("Settings…") }
         Divider()
         Button("Quit screenie") {
-            (NSApp.delegate as? AppDelegate)?.requestTermination()
+            AppDelegate.shared?.requestTermination()
         }
     }
 }
