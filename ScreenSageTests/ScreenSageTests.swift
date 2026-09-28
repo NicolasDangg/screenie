@@ -65,6 +65,32 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(AIProvider.openRouter.defaultModel, "openai/gpt-5.6-luna")
     }
 
+    func testResponseSplitsFencedCodeBlocks() {
+        let text = "Use a stack.\n\n```python\ndef push(item):\n    stack.append(item)\n```\nDone."
+
+        XCTAssertEqual(ResponseSegment.split(text), [
+            .prose("Use a stack.\n"),
+            .code(language: "python", code: "def push(item):\n    stack.append(item)"),
+            .prose("Done.")
+        ])
+    }
+
+    func testResponseKeepsUnclosedFenceAsCodeWhileStreaming() {
+        XCTAssertEqual(ResponseSegment.split("Here:\n  ```swift\n  let x = 1"), [
+            .prose("Here:"),
+            .code(language: "swift", code: "let x = 1")
+        ])
+    }
+
+    func testSyntaxHighlighterDoesNotColorKeywordsInsideComments() {
+        let highlighted = SyntaxHighlighter.highlight("return 1 # return", language: "python")
+        let runs = highlighted.runs.map { (String(highlighted[$0.range].characters), $0.foregroundColor) }
+
+        XCTAssertEqual(runs.first?.0, "return")
+        XCTAssertEqual(runs.last?.0, "# return")
+        XCTAssertNotEqual(runs.first?.1, runs.last?.1)
+    }
+
     @MainActor
     func testAPIKeyIsStoredInLocalPreferences() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!

@@ -37,8 +37,7 @@ struct OverlayAnswerView: View {
                 }
 
                 if !streamingResponse.isEmpty {
-                    Text(streamingResponse)
-                        .font(.system(size: 17))
+                    StreamingResponseText(text: streamingResponse)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .transition(.opacity)
