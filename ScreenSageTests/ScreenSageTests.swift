@@ -283,6 +283,8 @@ final class ScreenSageTests: XCTestCase {
         let panel = try XCTUnwrap(NSApp.keyWindow as? KeyablePanel)
 
         XCTAssertTrue(screen.visibleFrame.contains(panel.frame))
+        XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertFalse(panel.canBecomeMain)
     }
 
     @MainActor

@@ -29,7 +29,7 @@ final class OverlayPanelController {
                 width: OverlayLayout.collapsedWidth,
                 height: OverlayLayout.collapsedHeight
             ),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -142,7 +142,7 @@ final class OverlayPanelController {
             }
         }
         panel.alphaValue = 0
-        NSApp.activate(ignoringOtherApps: true)
+        // The panel is nonactivating: it takes key focus while the frontmost app stays active.
         panel.makeKeyAndOrderFront(nil)
         animate { self.panel.animator().alphaValue = 1 }
     }
