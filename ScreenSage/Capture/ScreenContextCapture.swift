@@ -3,7 +3,8 @@ import CoreVideo
 import ScreenCaptureKit
 
 enum ScreenContextCapture {
-    static func capture() async throws -> ScreenContext {
+    /// Captures the display under the pointer. OCR runs separately so the preview can appear first.
+    static func captureScreenshot() async throws -> CapturedScreenshot {
         guard CGPreflightScreenCaptureAccess() else {
             throw CGRequestScreenCaptureAccess()
                 ? ScreenCaptureError.restartRequired
@@ -30,7 +31,7 @@ enum ScreenContextCapture {
             properties: [.compressionFactor: 0.78]
         ) else { throw ScreenCaptureError.encodingFailed }
 
-        return try ScreenContext(imageData: jpeg, ocrText: VisionOCR.recognize(in: image))
+        return CapturedScreenshot(imageData: jpeg, image: image)
     }
 
     private static func displayUnderPointerID() -> CGDirectDisplayID? {

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 struct ScreenContext: Sendable {
@@ -5,3 +6,8 @@ struct ScreenContext: Sendable {
     let ocrText: String
 }
 
+
+struct CapturedScreenshot: Sendable {
+    let imageData: Data
+    let image: CGImage
+}

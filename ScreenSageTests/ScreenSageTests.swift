@@ -2,6 +2,7 @@ import AppKit
 import Carbon
 import ServiceManagement
 import SwiftUI
+import Vision
 import XCTest
 @testable import ScreenSage
 
@@ -135,6 +136,24 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(OverlayLayout.taskHeight, 480)
         XCTAssertEqual(OverlayLayout.controlDiameter, 25.2)
         XCTAssertEqual(OverlayLayout.cornerRadius, 22)
+        XCTAssertEqual(OverlayLayout.contentInset, 16)
+    }
+
+    func testOCRTimeoutAbandonsStalledRecognition() async {
+        let started = Date()
+        let text = await VisionOCR.withTimeout(0.1) {
+            Thread.sleep(forTimeInterval: 2)
+            return "late"
+        }
+        XCTAssertEqual(text, "")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+        let fastText = await VisionOCR.withTimeout(1) { "done" }
+        XCTAssertEqual(fastText, "done")
+    }
+
+    func testOCRFailureDoesNotThrow() {
+        struct RecognizerFailure: Error {}
+        XCTAssertEqual(VisionOCR.recognize { throw RecognizerFailure() }, "")
     }
 
     @MainActor

@@ -280,11 +280,16 @@ final class AppModel {
                 if conversation.id == conversationID { isWorking = false }
             }
             do {
-                let context = shouldIncludeScreenshot
-                    ? try await ScreenContextCapture.capture()
-                    : nil
-                guard conversation.id == conversationID else { return }
-                attachedScreenshot = context?.imageData
+                var context: ScreenContext?
+                if shouldIncludeScreenshot {
+                    let screenshot = try await ScreenContextCapture.captureScreenshot()
+                    guard conversation.id == conversationID else { return }
+                    attachedScreenshot = screenshot.imageData
+                    let ocrText = await VisionOCR.recognize(in: screenshot.image)
+                    try Task.checkCancellation()
+                    guard conversation.id == conversationID else { return }
+                    context = ScreenContext(imageData: screenshot.imageData, ocrText: ocrText)
+                }
                 var response = ""
                 for try await delta in providerClient.stream(
                     provider: provider,

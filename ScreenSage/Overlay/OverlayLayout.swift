@@ -9,4 +9,6 @@ enum OverlayLayout {
     static let taskHeight = 480.0
     static let controlDiameter = 25.2
     static let cornerRadius = 22.0
+    /// Shared horizontal inset so the header, messages, and composer align on one edge.
+    static let contentInset = 16.0
 }

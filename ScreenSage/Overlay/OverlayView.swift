@@ -58,20 +58,21 @@ struct OverlayView: View {
 
     private var resizeHandles: some View {
         GeometryReader { geometry in
-            let sideHeight = geometry.size.height - 32 - (model.attachedScreenshot == nil
-                ? OverlayLayout.collapsedHeight : OverlayLayout.attachedComposerHeight)
-            resizeHandle(.left, width: 18, height: sideHeight)
-                .position(x: 9, y: 32 + sideHeight / 2)
-            resizeHandle(.right, width: 18, height: sideHeight)
-                .position(x: geometry.size.width - 9, y: 32 + sideHeight / 2)
-            resizeHandle(.topLeft, width: 32, height: 32)
-                .position(x: 16, y: 16)
-            resizeHandle(.topRight, width: 32, height: 32)
-                .position(x: geometry.size.width - 16, y: 16)
-            resizeHandle(.bottomLeft, width: 32, height: 32)
-                .position(x: 16, y: geometry.size.height - 16)
-            resizeHandle(.bottomRight, width: 32, height: 32)
-                .position(x: geometry.size.width - 16, y: geometry.size.height - 16)
+            let corner = 14.0
+            let edge = 6.0
+            let sideHeight = geometry.size.height - corner * 2
+            resizeHandle(.left, width: edge, height: sideHeight)
+                .position(x: edge / 2, y: geometry.size.height / 2)
+            resizeHandle(.right, width: edge, height: sideHeight)
+                .position(x: geometry.size.width - edge / 2, y: geometry.size.height / 2)
+            resizeHandle(.topLeft, width: corner, height: corner)
+                .position(x: corner / 2, y: corner / 2)
+            resizeHandle(.topRight, width: corner, height: corner)
+                .position(x: geometry.size.width - corner / 2, y: corner / 2)
+            resizeHandle(.bottomLeft, width: corner, height: corner)
+                .position(x: corner / 2, y: geometry.size.height - corner / 2)
+            resizeHandle(.bottomRight, width: corner, height: corner)
+                .position(x: geometry.size.width - corner / 2, y: geometry.size.height - corner / 2)
         }
     }
 
@@ -111,10 +112,13 @@ struct OverlayView: View {
                     Button("New Chat", systemImage: "plus", action: model.startNewConversation)
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                         .help("New Chat")
                 }
-                .padding(.horizontal, 34)
-                .padding(.top, 14)
+                .padding(.horizontal, OverlayLayout.contentInset)
+                .frame(height: 44)
                 OverlayAnswerView(
                     messages: model.conversation.messages,
                     streamingResponse: model.streamingResponse,
@@ -134,14 +138,15 @@ struct OverlayView: View {
             ZStack(alignment: .topLeading) {
                 if model.prompt.isEmpty {
                     Text("Ask about your screen…")
+                        .font(.system(size: 14))
                         .foregroundStyle(.secondary)
-                        .padding(.top, 5)
-                        .padding(.leading, 5)
                         .allowsHitTesting(false)
                 }
                 TextEditor(text: $model.prompt)
                     .font(.system(size: 14))
                     .scrollContentBackground(.hidden)
+                    // Cancel NSTextView's built-in line padding so typed text aligns with the inset.
+                    .padding(.horizontal, -5)
                     .focused($promptIsFocused)
                     .accessibilityLabel("Message")
                     .onKeyPress(keys: [.return]) { press in
@@ -153,8 +158,9 @@ struct OverlayView: View {
             .frame(height: 34)
             composerFooter
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, OverlayLayout.contentInset)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
         .frame(height: model.attachedScreenshot == nil
                ? OverlayLayout.collapsedHeight : OverlayLayout.attachedComposerHeight)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.attachedScreenshot != nil)
@@ -202,7 +208,6 @@ struct OverlayView: View {
                 .disabled(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .opacity(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
         }
-        .padding(.horizontal, isExpanded ? 12 : 0)
     }
 
     @ViewBuilder private var modelControl: some View {

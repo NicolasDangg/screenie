@@ -57,7 +57,8 @@ struct OverlayAnswerView: View {
                         .font(.callout)
                 }
             }
-            .padding(14)
+            .padding(.horizontal, OverlayLayout.contentInset)
+            .padding(.vertical, 12)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: streamingResponse.isEmpty)
         }
         .defaultScrollAnchor(.bottom)
