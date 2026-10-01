@@ -10,6 +10,7 @@ final class TaskStore {
     private let fileURL: URL?
     private let calendarDelete: (@MainActor (ScreenieTask) async throws -> Void)?
     private let calendarSync: (@MainActor (ScreenieTask) async throws -> String?)?
+    private let syncsToCalendar: @MainActor () -> Bool
     private var syncTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
@@ -19,11 +20,13 @@ final class TaskStore {
         },
         calendarSync: (@MainActor (ScreenieTask) async throws -> String?)? = { task in
             return try await TaskCalendarSync.shared.upsert(task)
-        }
+        },
+        syncsToCalendar: @escaping @MainActor () -> Bool = { AppleTaskSources.syncsTasksToCalendar() }
     ) {
         self.fileURL = fileURL
         self.calendarDelete = calendarDelete
         self.calendarSync = calendarSync
+        self.syncsToCalendar = syncsToCalendar
         load()
         tasks.filter { $0.dueDate != nil }.forEach { synchronize($0.id) }
     }
@@ -191,6 +194,7 @@ final class TaskStore {
 
     private func synchronize(_ id: UUID) {
         guard let calendarSync,
+              syncsToCalendar(),
               let task = tasks.first(where: { $0.id == id }),
               task.dueDate != nil else { return }
 

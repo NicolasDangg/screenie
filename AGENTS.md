@@ -30,9 +30,11 @@ Keep these product decisions unless the user explicitly changes them:
 - Overlay dimensions are centralized in `ScreenSage/Overlay/OverlayLayout.swift`.
 - The overlay is a transparent, borderless floating `NSPanel` hosting SwiftUI. It can join all Spaces, appear with full-screen apps, and be dragged by its background.
 - The overlay saves its x/y origin on hide and restores it on later toggles and launches when that origin remains on a connected display.
-- The live glass effect comes from `NSVisualEffectView` in `LiveBackdropView`, with an adaptive SwiftUI border in `OverlayView`.
+- The overlay uses SwiftUI's system Liquid Glass (`glassEffect`) in `OverlayView`, including its default edge; there is no custom border.
 - Assistant output uses bundled `LaTeXSwiftUI` 2.x for local Markdown plus inline/display math rendering; user prompts retain native `AttributedString` Markdown.
-- `/task` and Option–Command–Space open a persistent task manager. `/task <entry>` uses Apple Foundation Models locally for structured natural-language parsing, with the deterministic parser as an availability/failure fallback; it does not use App Intents or a remote provider. Dated tasks synchronize to Apple Calendar through EventKit, and completed tasks remain restorable from History.
+- `/task` and Option–Command–Space open a persistent task manager. `/task <entry>` uses Apple Foundation Models locally for structured natural-language parsing, with the deterministic parser as an availability/failure fallback; it does not use App Intents or a remote provider. Dated tasks synchronize to Apple Calendar through EventKit (Settings › Tasks can turn this off), and completed tasks remain restorable from History.
+- The task views merge screenie tasks with Apple Reminders and Calendar events read live through `AppleEventKitClient`/`AppleTaskSources`. Reminders and events are never written to `tasks.json`; only the chosen lists, calendars, and new-task destination are stored in `UserDefaults`. Calendar copies of screenie tasks (notes containing “Managed by screenie”) are excluded so they do not appear twice. Reminders can be completed from screenie; events are read-only.
+- `TaskAgenda` holds the pure grouping logic for the list (Overdue, each day of the week ahead, Later, Someday) and week views.
 
 ## Request flow
 
@@ -66,7 +68,8 @@ Keep these product decisions unless the user explicitly changes them:
 - Tasks: `~/Library/Application Support/ScreenSage/tasks.json`
 - Provider/model/API keys: local `UserDefaults` preferences.
 - Screen Recording is required for real requests.
-- Full Calendar access is requested when the first dated task needs synchronization. Calendar failure never removes the local task.
+- Full Calendar access is requested when the first dated task needs synchronization, or from the Tasks panel's Connect prompt / Settings › Tasks. Calendar failure never removes the local task.
+- Full Reminders access is requested only from the Tasks panel's Connect prompt or Settings › Tasks.
 - Accessibility and Input Monitoring are shown as optional; the Carbon global shortcut does not depend on them.
 - Permission status comes from the native preflight APIs. Settings buttons deep-link to the appropriate Privacy & Security pane.
 - Screen Recording grants can require restarting screenie before capture works.

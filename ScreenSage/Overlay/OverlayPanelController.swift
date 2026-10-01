@@ -43,13 +43,18 @@ final class OverlayPanelController {
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.animationBehavior = .none
-        panel.contentView = NSHostingView(rootView: OverlayView(
+        let hostingView = NSHostingView(rootView: OverlayView(
             model: model,
             close: { [weak self] in self?.hide() },
             setExpanded: { [weak self] in self?.setExpanded($0) },
             resize: { [weak self] handle, location in self?.resize(handle, at: location) },
             endResize: { [weak self] in self?.resizeStart = nil }
         ))
+        // Keep everything outside the rounded glass fully transparent.
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = .clear
+        hostingView.safeAreaRegions = []
+        panel.contentView = hostingView
     }
 
     static func saveOrigin(_ origin: NSPoint, in defaults: UserDefaults) {

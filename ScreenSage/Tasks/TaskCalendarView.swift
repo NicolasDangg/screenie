@@ -1,297 +1,212 @@
 import SwiftUI
 
+/// A seven-day strip with a timeline for the selected day.
 struct TaskCalendarView: View {
-    let tasks: [ScreenieTask]
+    let items: [TaskAgendaItem]
+    @Binding var selectedDay: Date
     let errorMessage: String
     let isParsingTask: Bool
-    let isRequestingSchedule: Bool
-    let toggleCompletion: (UUID) -> Void
+    let toggleCompletion: (TaskAgendaItem) -> Void
     let updateDueDate: (UUID, Date?) -> Void
     let requestDelete: (ScreenieTask) -> Void
+    var calendar = Calendar.autoupdatingCurrent
 
-    @State private var displayedMonth: Date
-    @State private var selectedWeekStart: Date
-    @State private var scrollWeek: Date?
-
-    private let calendar: Calendar
-    private let today: Date
-    private let weekStarts: [Date]
-
-    init(
-        tasks: [ScreenieTask],
-        errorMessage: String,
-        isParsingTask: Bool,
-        isRequestingSchedule: Bool,
-        toggleCompletion: @escaping (UUID) -> Void,
-        updateDueDate: @escaping (UUID, Date?) -> Void,
-        requestDelete: @escaping (ScreenieTask) -> Void,
-        calendar: Calendar = .autoupdatingCurrent,
-        today: Date = .now
-    ) {
-        self.tasks = tasks
-        self.errorMessage = errorMessage
-        self.isParsingTask = isParsingTask
-        self.isRequestingSchedule = isRequestingSchedule
-        self.toggleCompletion = toggleCompletion
-        self.updateDueDate = updateDueDate
-        self.requestDelete = requestDelete
-        self.calendar = calendar
-        self.today = today
-
-        let weekStart = Self.weekDates(containing: today, calendar: calendar).first ?? today
-        _displayedMonth = State(initialValue: today)
-        _selectedWeekStart = State(initialValue: weekStart)
-        _scrollWeek = State(initialValue: weekStart)
-        // ponytail: a finite ±10-year pager avoids an infinite data source; extend if long-range planning needs it.
-        weekStarts = (-520...520).compactMap {
-            calendar.date(byAdding: .weekOfYear, value: $0, to: weekStart)
-        }
-    }
+    private var week: [Date] { TaskAgenda.weekDates(containing: selectedDay, calendar: calendar) }
 
     var body: some View {
         VStack(spacing: 0) {
-            monthHeader
-            weekdayHeader
-            monthGrid
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
+            HStack(spacing: 4) {
+                stepButton("Previous week", systemImage: "chevron.left", weeks: -1)
+                ForEach(week, id: \.self) { day in
+                    dayButton(day)
+                }
+                stepButton("Next week", systemImage: "chevron.right", weeks: 1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
 
-            Divider().opacity(0.3)
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Text(selectedDay, format: .dateTime.weekday(.wide).month(.wide).day())
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if !calendar.isDateInToday(selectedDay) {
+                                Button("Today") { selectedDay = .now }
+                                    .buttonStyle(.plain)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                        .padding(.vertical, 6)
 
-            GeometryReader { geometry in
-                ScrollView(.horizontal) {
-                    LazyHStack(spacing: 0) {
-                        ForEach(weekStarts, id: \.self) { weekStart in
-                            weeklyAgenda(starting: weekStart)
-                                .frame(width: geometry.size.width, height: geometry.size.height)
-                                .id(weekStart)
+                        timeline(now: context.date)
+
+                        if isParsingTask {
+                            ProgressView("Understanding task…").controlSize(.small).padding(.top, 8)
+                        }
+                        if !errorMessage.isEmpty {
+                            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                                .font(.callout)
+                                .foregroundStyle(.orange)
+                                .padding(.top, 8)
                         }
                     }
-                    .scrollTargetLayout()
+                    .padding(.horizontal, OverlayLayout.contentInset)
+                    .padding(.bottom, 10)
                 }
                 .scrollIndicators(.hidden)
-                .scrollTargetBehavior(.paging)
-                .scrollPosition(id: $scrollWeek)
-            }
-        }
-        .onChange(of: scrollWeek) { _, weekStart in
-            guard let weekStart else { return }
-            selectedWeekStart = weekStart
-            displayedMonth = calendar.date(byAdding: .day, value: 3, to: weekStart) ?? weekStart
-        }
-    }
-
-    static func monthDates(containing date: Date, calendar: Calendar) -> [Date] {
-        guard let monthStart = calendar.dateInterval(of: .month, for: date)?.start,
-              let gridStart = calendar.dateInterval(of: .weekOfYear, for: monthStart)?.start else {
-            return []
-        }
-        return (0..<42).compactMap { calendar.date(byAdding: .day, value: $0, to: gridStart) }
-    }
-
-    static func weekDates(containing date: Date, calendar: Calendar) -> [Date] {
-        guard let start = calendar.dateInterval(of: .weekOfYear, for: date)?.start else { return [] }
-        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
-    }
-
-    private var monthHeader: some View {
-        HStack(spacing: 4) {
-            Text(displayedMonth, format: .dateTime.month(.wide).year())
-                .font(.system(size: 16, weight: .semibold))
-            Spacer()
-            calendarButton("Previous month", systemImage: "chevron.left") { moveMonth(-1) }
-            calendarButton("Today", systemImage: "circle.fill", action: showToday)
-                .font(.system(size: 7))
-            calendarButton("Next month", systemImage: "chevron.right") { moveMonth(1) }
-        }
-        .padding(.horizontal, 13)
-        .frame(height: 38)
-    }
-
-    private var weekdayHeader: some View {
-        let formatter = DateFormatter()
-        let symbols = formatter.veryShortStandaloneWeekdaySymbols ?? formatter.veryShortWeekdaySymbols ?? []
-        let offset = max(0, min(symbols.count, calendar.firstWeekday - 1))
-        let ordered = Array(symbols.dropFirst(offset) + symbols.prefix(offset))
-
-        return LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7),
-            spacing: 0
-        ) {
-            ForEach(Array(ordered.enumerated()), id: \.offset) { _, symbol in
-                Text(symbol)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(height: 18)
-            }
-        }
-        .padding(.horizontal, 10)
-    }
-
-    private var monthGrid: some View {
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7),
-            spacing: 2
-        ) {
-            ForEach(Self.monthDates(containing: displayedMonth, calendar: calendar), id: \.self) { date in
-                TaskCalendarDayCell(
-                    date: date,
-                    isInDisplayedMonth: calendar.isDate(date, equalTo: displayedMonth, toGranularity: .month),
-                    isToday: calendar.isDate(date, inSameDayAs: today),
-                    isSelectedWeek: calendar.isDate(date, equalTo: selectedWeekStart, toGranularity: .weekOfYear),
-                    tasks: tasks.filter { task in
-                        task.dueDate.map { calendar.isDate($0, inSameDayAs: date) } == true
-                    }
-                ) {
-                    selectWeek(containing: date)
-                }
             }
         }
     }
 
-    private func weeklyAgenda(starting weekStart: Date) -> some View {
-        let days = Self.weekDates(containing: weekStart, calendar: calendar)
-        let datedDays = days.filter { day in
-            tasks.contains { task in
-                task.dueDate.map { calendar.isDate($0, inSameDayAs: day) } == true
-            }
-        }
-
-        return ScrollView {
-            LazyVStack(spacing: 0) {
-                if datedDays.isEmpty {
-                    ContentUnavailableView(
-                        "No tasks this week",
-                        systemImage: "calendar",
-                        description: Text("Swipe horizontally to view another week.")
-                    )
-                    .frame(minHeight: 120)
-                } else {
-                    ForEach(datedDays, id: \.self) { day in
-                        agendaHeader(for: day)
-                        ForEach(tasks.filter { task in
-                            task.dueDate.map { calendar.isDate($0, inSameDayAs: day) } == true
-                        }) { task in
-                            TaskRowView(
-                                task: task,
-                                isAgenda: true,
-                                toggleCompletion: { toggleCompletion(task.id) },
-                                updateDueDate: { updateDueDate(task.id, $0) },
-                                delete: { requestDelete(task) }
-                            )
-                        }
+    @ViewBuilder private func timeline(now: Date) -> some View {
+        let dayItems = TaskAgenda.dayItems(items, on: selectedDay, calendar: calendar)
+        if dayItems.isEmpty {
+            Text("Nothing scheduled.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 18)
+        } else {
+            let nowIndex = calendar.isDate(selectedDay, inSameDayAs: now)
+                ? dayItems.firstIndex { $0.hasTime && ($0.date ?? now) > now } ?? dayItems.endIndex
+                : nil
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 0) {
+                ForEach(Array(dayItems.enumerated()), id: \.element.id) { index, item in
+                    if index == nowIndex { nowLine(now) }
+                    GridRow {
+                        Text(item.hasTime ? (item.date ?? now).formatted(date: .omitted, time: .shortened) : "All day")
+                            .font(.system(size: 12))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 64, alignment: .leading)
+                        block(for: item)
+                            .padding(.leading, 12)
+                            .padding(.vertical, 3)
+                            .overlay(alignment: .leading) {
+                                Rectangle().fill(.primary.opacity(0.1)).frame(width: 1)
+                            }
                     }
                 }
-
-                if isParsingTask {
-                    ProgressView("Understanding task…").controlSize(.small).padding()
-                }
-                if isRequestingSchedule {
-                    ProgressView("Finding study time…").controlSize(.small).padding()
-                }
-                if !errorMessage.isEmpty {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                }
+                if nowIndex == dayItems.endIndex { nowLine(now) }
             }
         }
-        .scrollIndicators(.hidden)
     }
 
-    private func agendaHeader(for date: Date) -> some View {
-        HStack {
-            Text(dayLabel(for: date))
-            Spacer()
-            Text(date, format: .dateTime.month(.abbreviated).day())
+    private func nowLine(_ now: Date) -> some View {
+        GridRow {
+            Text(now, format: .dateTime.hour().minute())
+                .font(.system(size: 12, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(.red)
+            HStack(spacing: 0) {
+                Circle().fill(.red).frame(width: 7, height: 7).offset(x: -3)
+                Rectangle().fill(.red).frame(height: 1.5)
+            }
+            .padding(.vertical, 6)
         }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 13)
-        .padding(.top, 9)
-        .padding(.bottom, 3)
+        .accessibilityLabel("Now")
     }
 
-    private func dayLabel(for date: Date) -> String {
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInTomorrow(date) { return "Tomorrow" }
-        return date.formatted(.dateTime.weekday(.wide))
-    }
-
-    private func calendarButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(title, systemImage: systemImage, action: action)
-            .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
-            .frame(width: 24, height: 24)
-            .contentShape(.rect)
-    }
-
-    private func moveMonth(_ amount: Int) {
-        guard let nextMonth = calendar.date(byAdding: .month, value: amount, to: displayedMonth),
-              let monthStart = calendar.dateInterval(of: .month, for: nextMonth)?.start else { return }
-        displayedMonth = monthStart
-        selectWeek(containing: monthStart)
-    }
-
-    private func showToday() {
-        displayedMonth = today
-        selectWeek(containing: today)
-    }
-
-    private func selectWeek(containing date: Date) {
-        guard let weekStart = Self.weekDates(containing: date, calendar: calendar).first else { return }
-        selectedWeekStart = weekStart
-        scrollWeek = weekStart
-    }
-}
-
-private struct TaskCalendarDayCell: View {
-    let date: Date
-    let isInDisplayedMonth: Bool
-    let isToday: Bool
-    let isSelectedWeek: Bool
-    let tasks: [ScreenieTask]
-    let select: () -> Void
-
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: select) {
-            VStack(spacing: 1) {
-                Text(date, format: .dateTime.day())
-                    .font(.system(size: 13, weight: .medium))
-                HStack(spacing: 2) {
-                    ForEach(Array(tasks.prefix(3).enumerated()), id: \.offset) { _, task in
+    private func block(for item: TaskAgendaItem) -> some View {
+        HStack(spacing: 8) {
+            switch item.kind {
+            case .event:
+                TaskSourceMark(kind: .event, tint: item.tint)
+            case .task, .reminder:
+                Button { toggleCompletion(item) } label: {
+                    if item.isCompleted {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
+                    } else {
                         Circle()
-                            .fill(task.isCompleted ? Color.secondary.opacity(0.55) : Color.accentColor)
-                            .frame(width: 3.5, height: 3.5)
+                            .strokeBorder(item.kind == .reminder ? item.tint : Color.secondary, lineWidth: 1.5)
+                            .frame(width: 13, height: 13)
                     }
                 }
-                .frame(height: 4)
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.isCompleted ? "Mark incomplete" : "Mark complete")
             }
-            .foregroundStyle(isInDisplayedMonth ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-            .frame(maxWidth: .infinity, minHeight: 29)
-            .background {
-                if isSelectedWeek {
-                    RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.12))
+            Text(item.title)
+                .strikethrough(item.isCompleted)
+                .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(detail(for: item))
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .font(.system(size: 13))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(item.tint.opacity(item.isCompleted ? 0.06 : 0.14), in: .rect(cornerRadius: 8))
+        .contextMenu {
+            if let task = item.task {
+                Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(task) }
+            }
+        }
+    }
+
+    private func detail(for item: TaskAgendaItem) -> String {
+        switch item.kind {
+        case .task:
+            return "screenie"
+        case .reminder:
+            return "Reminders · \(item.sourceName)"
+        case .event:
+            guard item.hasTime, let start = item.date, let end = item.endDate else { return item.sourceName }
+            let range = "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))"
+            return "\(range) · \(item.sourceName)"
+        }
+    }
+
+    private func dayButton(_ day: Date) -> some View {
+        let isSelected = calendar.isDate(day, inSameDayAs: selectedDay)
+        let isToday = calendar.isDateInToday(day)
+        let marks = Array(TaskAgenda.dayItems(items, on: day, calendar: calendar).filter { !$0.isCompleted }.prefix(3))
+        return Button { selectedDay = day } label: {
+            VStack(spacing: 3) {
+                Text(day, format: .dateTime.weekday(.abbreviated))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .textCase(.uppercase)
+                    .opacity(0.75)
+                Text(day, format: .dateTime.day())
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(isToday && !isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                HStack(spacing: 3) {
+                    ForEach(marks) { item in
+                        Circle()
+                            .fill(isSelected ? AnyShapeStyle(.background) : AnyShapeStyle(item.tint))
+                            .frame(width: 5, height: 5)
+                    }
                 }
+                .frame(height: 5)
             }
-            .overlay {
-                if isToday || isHovered {
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(isToday ? Color.accentColor : Color.secondary.opacity(0.45), lineWidth: isToday ? 1.6 : 1)
-                }
-            }
+            .frame(maxWidth: .infinity, minHeight: 60)
+            .foregroundStyle(isSelected ? AnyShapeStyle(.background) : AnyShapeStyle(.primary))
+            .background(
+                isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary.opacity(0.05)),
+                in: .rect(cornerRadius: 10)
+            )
+            .contentShape(.rect(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
-        .accessibilityValue(tasks.isEmpty ? "No tasks" : "\(tasks.count) tasks")
+        .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+        .accessibilityValue(marks.isEmpty ? "Nothing scheduled" : "\(marks.count) items")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func stepButton(_ title: String, systemImage: String, weeks: Int) -> some View {
+        Button(title, systemImage: systemImage) {
+            selectedDay = calendar.date(byAdding: .weekOfYear, value: weeks, to: selectedDay) ?? selectedDay
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .frame(width: 20, height: 60)
+        .contentShape(.rect)
     }
 }

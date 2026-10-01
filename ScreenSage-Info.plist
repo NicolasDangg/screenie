@@ -3,7 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>screenie adds and updates dated tasks in your Apple Calendar.</string>
+	<string>screenie shows your calendar events alongside tasks and adds dated tasks to Apple Calendar.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>screenie shows your reminders alongside tasks, lets you check them off, and can save new tasks to Reminders.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>screenie captures one screenshot when you submit a prompt so it can answer using what is on your screen.</string>
 </dict>

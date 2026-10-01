@@ -15,6 +15,8 @@ struct ScreenSageApp: App {
             )
         }
         .defaultSize(width: 720, height: 520)
-        Settings { SettingsView(settings: AppRuntime.shared.settings) }
+        Settings {
+            SettingsView(settings: AppRuntime.shared.settings, taskSources: AppRuntime.shared.model.taskSources)
+        }
     }
 }

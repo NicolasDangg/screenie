@@ -3,42 +3,41 @@ import SwiftUI
 struct TaskManagerView: View {
     @Bindable var model: AppModel
     @State private var viewMode = TaskViewMode.list
+    @State private var filter = TaskAgendaFilter.all
+    @State private var selectedDay = Date.now
+    @State private var entry = ""
     @State private var isAddingTask = false
     @State private var pendingDeletion: ScreenieTask?
+    @FocusState private var entryIsFocused: Bool
+
+    private var sources: AppleTaskSources { model.taskSources }
+
+    private var items: [TaskAgendaItem] {
+        TaskAgenda.items(tasks: model.taskStore.tasks, reminders: sources.reminders, events: sources.events)
+    }
+
+    private var errorMessage: String {
+        [model.taskError, model.taskStore.errorMessage, sources.errorMessage].first { !$0.isEmpty } ?? ""
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("Tasks")
-                    .font(.headline)
-                    .bold()
-                Spacer()
-                Button(
-                    viewMode == .list ? "Show calendar" : "Show task list",
-                    systemImage: viewMode == .list ? "calendar" : "list.bullet",
-                    action: toggleViewMode
-                )
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                Button("Return to chat", systemImage: "sparkles", action: model.presentChat)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 42)
-
+            header
             Divider().opacity(0.35)
 
             if viewMode == .list {
                 TaskListView(
-                    tasks: model.taskStore.sortedTasks,
+                    sections: TaskAgenda.listSections(items, filter: filter, now: .now, calendar: .autoupdatingCurrent),
+                    filter: $filter,
                     schedule: model.taskSchedule,
-                    errorMessage: model.taskError.isEmpty ? model.taskStore.errorMessage : model.taskError,
+                    errorMessage: errorMessage,
                     isParsingTask: model.isParsingTask,
                     isRequestingSchedule: model.isRequestingTaskSchedule,
                     isAddingScheduleToCalendar: model.isAddingTaskScheduleToCalendar,
                     didAddScheduleToCalendar: model.didAddTaskScheduleToCalendar,
-                    toggleCompletion: model.taskStore.toggleCompletion,
+                    needsConnection: sources.needsConnection,
+                    connect: { Task { await sources.requestAccess() } },
+                    toggleCompletion: model.toggleCompletion(of:),
                     updateDueDate: model.taskStore.updateDueDate,
                     requestDelete: requestDelete,
                     dismissSchedule: model.dismissTaskSchedule,
@@ -46,38 +45,43 @@ struct TaskManagerView: View {
                 )
             } else {
                 TaskCalendarView(
-                    tasks: model.taskStore.sortedTasks,
-                    errorMessage: model.taskError.isEmpty ? model.taskStore.errorMessage : model.taskError,
+                    items: items,
+                    selectedDay: $selectedDay,
+                    errorMessage: errorMessage,
                     isParsingTask: model.isParsingTask,
-                    isRequestingSchedule: model.isRequestingTaskSchedule,
-                    toggleCompletion: model.taskStore.toggleCompletion,
+                    toggleCompletion: model.toggleCompletion(of:),
                     updateDueDate: model.taskStore.updateDueDate,
                     requestDelete: requestDelete
                 )
             }
 
             Divider().opacity(0.35)
-
-            HStack {
-                Button("Add task", systemImage: "plus", action: showAddTask)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.small)
-                    .help("Add task")
-                Spacer()
-                Button("Schedule hint", systemImage: "wand.and.stars", action: showScheduleHint)
-                    .buttonStyle(.plain)
-                    .disabled(model.isRequestingTaskSchedule)
-            }
-            .font(.callout)
-            .padding(.horizontal, 14)
-            .frame(height: 43)
+            composer
+        }
+        .task {
+            entryIsFocused = true
+            await sources.refresh()
+        }
+        .onChange(of: model.presentationID) {
+            entryIsFocused = true
+            sources.scheduleRefresh()
+        }
+        .onChange(of: selectedDay, initial: true) { _, day in
+            let week = TaskAgenda.weekDates(containing: day, calendar: .autoupdatingCurrent)
+            guard let start = week.first, let last = week.last,
+                  let end = Calendar.autoupdatingCurrent.date(byAdding: .day, value: 1, to: last) else { return }
+            sources.showEvents(in: DateInterval(start: start, end: end))
         }
         .sheet(isPresented: $isAddingTask) {
             AddTaskView { task in
-                model.taskStore.add(task)
-                model.taskError = ""
+                Task {
+                    do {
+                        try await model.add(task)
+                        model.taskError = ""
+                    } catch {
+                        model.taskError = error.localizedDescription
+                    }
+                }
             }
         }
         .alert(
@@ -98,12 +102,134 @@ struct TaskManagerView: View {
         }
     }
 
-    private func toggleViewMode() {
-        viewMode = viewMode == .list ? .calendar : .list
+    private var header: some View {
+        HStack(spacing: 10) {
+            Text("Tasks")
+                .font(.system(size: 13, weight: .bold))
+            subtitle
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Picker("View", selection: $viewMode) {
+                Text("List").tag(TaskViewMode.list)
+                Text("Week").tag(TaskViewMode.calendar)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .fixedSize()
+            Button("Return to chat", systemImage: "sparkles", action: model.presentChat)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(.rect)
+                .help("Return to chat")
+        }
+        .padding(.leading, OverlayLayout.contentInset)
+        .padding(.trailing, 12)
+        .frame(height: 44)
     }
 
-    private func showAddTask() {
-        isAddingTask = true
+    @ViewBuilder private var subtitle: some View {
+        if viewMode == .calendar {
+            let week = TaskAgenda.weekDates(containing: selectedDay, calendar: .autoupdatingCurrent)
+            if let first = week.first, let last = week.last {
+                Text((first..<last).formatted(.interval.month(.abbreviated).day()))
+            }
+        } else if sources.hasConnectedSource, let lastRefreshed = sources.lastRefreshed {
+            Button { sources.scheduleRefresh() } label: {
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Label {
+                        Text(lastRefreshed > context.date.addingTimeInterval(-60)
+                             ? "Synced just now"
+                             : "Synced \(lastRefreshed.formatted(.relative(presentation: .named)))")
+                    } icon: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Refresh Reminders and Calendar")
+        } else {
+            let open = model.taskStore.activeTasks.count
+            Text("\(open) open")
+        }
+    }
+
+    private var composer: some View {
+        HStack(spacing: 10) {
+            Button("Add task with details", systemImage: "plus") { isAddingTask = true }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Add task with details")
+
+            TextField("Call mom Friday at 6…", text: $entry)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .focused($entryIsFocused)
+                .onSubmit(submitEntry)
+                .disabled(model.isParsingTask)
+                .accessibilityLabel("New task")
+
+            if model.isParsingTask {
+                ProgressView().controlSize(.small)
+            }
+
+            destinationMenu
+
+            Button("Suggest a schedule", systemImage: "wand.and.stars", action: showScheduleHint)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .background(.primary.opacity(0.06), in: .rect(cornerRadius: 8))
+                .contentShape(.rect)
+                .disabled(model.isRequestingTaskSchedule)
+                .help("Suggest a schedule")
+        }
+        .padding(.leading, OverlayLayout.contentInset)
+        .padding(.trailing, 12)
+        .frame(height: 52)
+    }
+
+    private var destinationMenu: some View {
+        @Bindable var sources = sources
+        let list = sources.newTaskReminderList
+        return Menu {
+            Picker("Save new tasks to", selection: $sources.newTaskReminderListID) {
+                Text("screenie").tag(String?.none)
+                if !sources.reminderLists.isEmpty {
+                    Section("Reminders") {
+                        ForEach(sources.reminderLists) { list in
+                            Text(list.title).tag(Optional(list.id))
+                        }
+                    }
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 5) {
+                TaskSourceMark(
+                    kind: list == nil ? .task : .reminder,
+                    tint: list?.color.color ?? .accentColor
+                )
+                Text(list?.title ?? "screenie")
+            }
+            .font(.system(size: 11.5))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .foregroundStyle(.secondary)
+        .help("Where new tasks are saved")
+    }
+
+    private func submitEntry() {
+        let text = entry
+        entry = ""
+        model.addTask(entry: text)
     }
 
     private func showScheduleHint() {

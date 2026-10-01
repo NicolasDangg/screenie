@@ -3,7 +3,6 @@ import SwiftUI
 
 struct OverlayView: View {
     @Bindable var model: AppModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var promptIsFocused: Bool
     @State private var showingModelPicker = false
     let close: () -> Void
@@ -32,20 +31,14 @@ struct OverlayView: View {
         }
         .frame(width: width, height: height)
         .background(PanelDragArea())
-        .background { LiveBackdropView().allowsHitTesting(false) }
-        .clipShape(.rect(cornerRadius: OverlayLayout.cornerRadius))
-        .overlay {
+        // A light wash of the window background makes the glass about 20% less see-through.
+        // Drawn as a shape so it can't spill into the panel's safe area as a square backdrop.
+        .background {
             RoundedRectangle(cornerRadius: OverlayLayout.cornerRadius)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.white.opacity(0.55), .primary.opacity(0.12), .white.opacity(0.24)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.9
-                )
-                .allowsHitTesting(false)
+                .fill(.background.opacity(0.2))
         }
+        .clipShape(.rect(cornerRadius: OverlayLayout.cornerRadius))
+        .glassEffect(.regular, in: .rect(cornerRadius: OverlayLayout.cornerRadius))
         .overlay { if model.presentationMode == .chat && isExpanded { resizeHandles } }
         .onExitCommand(perform: close)
         .onChange(of: isExpanded, initial: true) { _, expanded in setExpanded(expanded) }
@@ -103,28 +96,32 @@ struct OverlayView: View {
     private var chatContent: some View {
         VStack(spacing: 0) {
             if isExpanded {
-                HStack {
-                    Text(model.conversation.title)
+                HStack(spacing: 8) {
+                    Text(model.hasCompletedFirstResponse ? model.conversation.title : "New conversation")
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(model.hasCompletedFirstResponse ? .primary : .secondary)
                     Spacer()
                     Button("New Chat", systemImage: "plus", action: model.startNewConversation)
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
+                        .frame(width: 28, height: 28)
+                        .background(.primary.opacity(0.06), in: .rect(cornerRadius: 8))
+                        .contentShape(.rect)
                         .help("New Chat")
                 }
-                .padding(.horizontal, OverlayLayout.contentInset)
+                .padding(.leading, OverlayLayout.contentInset)
+                .padding(.trailing, 12)
                 .frame(height: 44)
+                Divider().opacity(0.35)
                 OverlayAnswerView(
                     messages: model.conversation.messages,
                     streamingResponse: model.streamingResponse,
                     errorMessage: model.errorMessage,
-                    isWorking: model.isWorking,
-                    includesScreenContext: model.includeScreenshotForNextMessage
+                    workPhase: model.workPhase,
+                    attachedScreenshot: model.attachedScreenshot,
+                    askAgain: model.askAgainWithNewScreenshot
                 )
                 Divider().opacity(0.35)
             }
@@ -134,10 +131,9 @@ struct OverlayView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 4) {
-            attachment
             ZStack(alignment: .topLeading) {
                 if model.prompt.isEmpty {
-                    Text("Ask about your screen…")
+                    Text(model.hasCompletedFirstResponse ? "Ask a follow-up…" : "Ask about your screen…")
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                         .allowsHitTesting(false)
@@ -155,59 +151,73 @@ struct OverlayView: View {
                         return .handled
                     }
             }
-            .frame(height: 34)
+            // Nudge the text down without changing the composer's outer margins or the footer's position.
+            .frame(height: 30)
+            .padding(.top, 4)
             composerFooter
         }
         .padding(.horizontal, OverlayLayout.contentInset)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .frame(height: model.attachedScreenshot == nil
-               ? OverlayLayout.collapsedHeight : OverlayLayout.attachedComposerHeight)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.attachedScreenshot != nil)
-    }
-
-    @ViewBuilder private var attachment: some View {
-        if let data = model.attachedScreenshot, let image = NSImage(data: data) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 56, height: 31)
-                .clipShape(.rect(cornerRadius: 7))
-                .accessibilityLabel("Screenshot sent with latest prompt")
-                .help("Screenshot sent with latest prompt")
-                .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
-        }
+        .frame(height: OverlayLayout.collapsedHeight)
     }
 
     private var composerFooter: some View {
-        HStack(spacing: 8) {
-            Button(action: model.toggleScreenshotForNextMessage) {
-                Label("Include screenshot", systemImage: model.includeScreenshotForNextMessage
-                      ? "camera.fill" : "camera")
-                    .labelStyle(.iconOnly)
-                    .foregroundStyle(model.includeScreenshotForNextMessage ? .blue : .secondary)
+        HStack(spacing: 6) {
+            // The first message always includes a screenshot, so the toggle only appears for follow-ups.
+            if model.hasCompletedFirstResponse {
+                screenshotToggle
             }
-            .buttonStyle(.plain)
-            .disabled(!model.canToggleScreenshot)
-            .help(model.canToggleScreenshot
-                  ? "Include screenshot with next message"
-                  : "The first message includes a screenshot")
-            .accessibilityValue(model.includeScreenshotForNextMessage ? "On" : "Off")
-
             modelControl
             Spacer()
-            Text("⌘↵")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            Button("Send", systemImage: "arrow.up", action: model.submit)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .frame(width: 24, height: 24)
-                .background(.blue, in: .circle)
-                .foregroundStyle(.white)
-                .disabled(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(model.isWorking || model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
+            if model.isWorking {
+                Text("⌘. to stop")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Button("Stop", systemImage: "stop.fill", action: model.stopResponse)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9))
+                    .frame(width: 26, height: 26)
+                    .background(.primary.opacity(0.14), in: .circle)
+                    .keyboardShortcut(".", modifiers: .command)
+                    .help("Stop response")
+            } else {
+                Text("⌘↵")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Button("Send", systemImage: "arrow.up", action: model.submit)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 26, height: 26)
+                    .background(canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary.opacity(0.1)), in: .circle)
+                    .foregroundStyle(canSend ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                    .disabled(!canSend)
+            }
         }
+    }
+
+    private var canSend: Bool {
+        !model.isWorking && !model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var screenshotToggle: some View {
+        let isOn = model.includeScreenshotForNextMessage
+        return Button(action: model.toggleScreenshotForNextMessage) {
+            Label("Include screenshot", systemImage: isOn ? "dot.viewfinder" : "viewfinder")
+                .labelStyle(.iconOnly)
+                .font(.system(size: 14))
+                .foregroundStyle(isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .frame(width: 24, height: 24)
+                .background(isOn ? AnyShapeStyle(.tint.opacity(0.15)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 7))
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, -4)
+        .disabled(!model.canToggleScreenshot)
+        .help(isOn ? "Next message includes a new screenshot" : "Include a new screenshot with next message")
+        .accessibilityValue(isOn ? "On" : "Off")
     }
 
     @ViewBuilder private var modelControl: some View {

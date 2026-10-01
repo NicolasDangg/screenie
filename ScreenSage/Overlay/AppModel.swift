@@ -1,10 +1,18 @@
 import Foundation
 import Observation
 
+/// Where a submitted prompt is before its answer starts streaming.
+enum WorkPhase: Equatable {
+    case capturing
+    case readingText
+    case thinking
+}
+
 @MainActor
 @Observable
 final class AppModel {
     var prompt = ""
+    var workPhase: WorkPhase?
     var presentationMode = AppPresentationMode.chat
     var conversation = Conversation()
     var streamingResponse = ""
@@ -23,6 +31,7 @@ final class AppModel {
 
     let settings: AppSettings
     let taskStore: TaskStore
+    let taskSources: AppleTaskSources
     private let history: ChatHistoryStore
     private let providerClient = ProviderClient()
     private let mockResponse: String?
@@ -42,6 +51,7 @@ final class AppModel {
         settings: AppSettings,
         history: ChatHistoryStore = ChatHistoryStore(),
         taskStore: TaskStore = TaskStore(),
+        taskSources: AppleTaskSources? = nil,
         mockResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_RESPONSE"],
         mockScheduleResponse: String? = ProcessInfo.processInfo.environment["SCREENIE_MOCK_SCHEDULE"],
         taskScheduleCalendarSync: @escaping @MainActor (TaskSchedule) async throws -> Void = {
@@ -55,6 +65,7 @@ final class AppModel {
         self.settings = settings
         self.history = history
         self.taskStore = taskStore
+        self.taskSources = taskSources ?? AppleTaskSources()
         self.mockResponse = mockResponse
         self.mockScheduleResponse = mockScheduleResponse
         self.taskScheduleCalendarSync = taskScheduleCalendarSync
@@ -93,6 +104,7 @@ final class AppModel {
         streamingResponse = ""
         errorMessage = ""
         isWorking = false
+        workPhase = nil
         includeScreenshotForNextMessage = true
         attachedScreenshot = nil
         presentationID += 1
@@ -216,6 +228,7 @@ final class AppModel {
         requestTask?.cancel()
         requestTask = nil
         isWorking = false
+        workPhase = nil
         streamingResponse = ""
         persistConversationIfNeeded()
 
@@ -275,9 +288,13 @@ final class AppModel {
         attachedScreenshot = nil
 
         requestTask?.cancel()
+        workPhase = shouldIncludeScreenshot ? .capturing : .thinking
         requestTask = Task {
             defer {
-                if conversation.id == conversationID { isWorking = false }
+                if conversation.id == conversationID {
+                    isWorking = false
+                    workPhase = nil
+                }
             }
             do {
                 var context: ScreenContext?
@@ -285,10 +302,12 @@ final class AppModel {
                     let screenshot = try await ScreenContextCapture.captureScreenshot()
                     guard conversation.id == conversationID else { return }
                     attachedScreenshot = screenshot.imageData
+                    workPhase = .readingText
                     let ocrText = await VisionOCR.recognize(in: screenshot.image)
                     try Task.checkCancellation()
                     guard conversation.id == conversationID else { return }
                     context = ScreenContext(imageData: screenshot.imageData, ocrText: ocrText)
+                    workPhase = .thinking
                 }
                 var response = ""
                 for try await delta in providerClient.stream(
@@ -339,6 +358,36 @@ final class AppModel {
         }
     }
 
+    /// Stops the current request, keeping whatever part of the answer already arrived.
+    func stopResponse() {
+        guard isWorking else { return }
+        requestTask?.cancel()
+        requestTask = nil
+        isWorking = false
+        workPhase = nil
+        let partial = streamingResponse
+        streamingResponse = ""
+        guard !partial.isEmpty else { return }
+        conversation.messages.append(ChatMessage(role: .assistant, text: partial))
+        conversation.updatedAt = .now
+        if conversation.messages.filter({ $0.role == .assistant }).count == 1,
+           let firstPrompt = conversation.messages.first(where: { $0.role == .user })?.text {
+            conversation.title = Conversation.cleanedTitle("", fallbackPrompt: firstPrompt)
+        }
+        history.upsert(conversation)
+    }
+
+    /// Replaces the last answer by asking the same prompt again with a fresh screenshot.
+    func askAgainWithNewScreenshot() {
+        guard !isWorking,
+              conversation.messages.last?.role == .assistant,
+              let userIndex = conversation.messages.lastIndex(where: { $0.role == .user }) else { return }
+        prompt = conversation.messages[userIndex].text
+        conversation.messages.removeSubrange(userIndex...)
+        includeScreenshotForNextMessage = true
+        submit()
+    }
+
     private func persistConversationIfNeeded() {
         guard conversation.messages.contains(where: { $0.role == .assistant }) else { return }
         conversation.updatedAt = .now
@@ -350,8 +399,15 @@ final class AppModel {
         guard lowercased == "/task" || lowercased.hasPrefix("/task ") else { return false }
 
         presentTasks()
-        let entry = submittedPrompt.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !entry.isEmpty else { return true }
+        addTask(entry: String(submittedPrompt.dropFirst(5)))
+        return true
+    }
+
+    /// Parses a natural-language entry on-device, then saves it where Settings › Tasks says.
+    func addTask(entry rawEntry: String) {
+        let entry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entry.isEmpty else { return }
+        taskError = ""
         taskParsingTask?.cancel()
         let parsingID = UUID()
         taskParsingID = parsingID
@@ -361,7 +417,7 @@ final class AppModel {
                 let task = try await taskParser(entry)
                 try Task.checkCancellation()
                 guard taskParsingID == parsingID else { return }
-                taskStore.add(task)
+                try await add(task)
             } catch is CancellationError {
             } catch {
                 guard taskParsingID == parsingID else { return }
@@ -372,7 +428,29 @@ final class AppModel {
             taskParsingID = nil
             isParsingTask = false
         }
-        return true
+    }
+
+    /// Saves to the chosen Reminders list when one is set and reachable, otherwise as a screenie task.
+    func add(_ task: ScreenieTask) async throws {
+        if taskSources.newTaskReminderListID != nil, taskSources.reminderLists.isEmpty {
+            await taskSources.refresh()
+        }
+        if let list = taskSources.newTaskReminderList {
+            try await taskSources.addReminder(task, to: list.id)
+        } else {
+            taskStore.add(task)
+        }
+    }
+
+    func toggleCompletion(of item: TaskAgendaItem) {
+        switch item.source {
+        case let .task(task):
+            taskStore.toggleCompletion(of: task.id)
+        case let .reminder(reminder):
+            taskSources.setReminder(reminder, completed: !reminder.isCompleted)
+        case .event:
+            break
+        }
     }
 
     private func cancelTaskParsing() {

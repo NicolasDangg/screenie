@@ -2,6 +2,24 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var settings: AppSettings
+    let taskSources: AppleTaskSources
+
+    var body: some View {
+        TabView {
+            Tab("General", systemImage: "gearshape") {
+                GeneralSettingsView(settings: settings)
+            }
+            Tab("Tasks", systemImage: "checklist") {
+                TaskSourcesSettingsView(sources: taskSources)
+            }
+        }
+        .frame(width: 460)
+        .frame(minHeight: 520)
+    }
+}
+
+private struct GeneralSettingsView: View {
+    @Bindable var settings: AppSettings
 
     var body: some View {
         Form {
@@ -24,7 +42,5 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
-        .padding()
-        .frame(width: 460)
     }
 }

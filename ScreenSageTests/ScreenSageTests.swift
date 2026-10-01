@@ -131,8 +131,7 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(OverlayLayout.width, 560)
         XCTAssertEqual(OverlayLayout.collapsedWidth, 320)
         XCTAssertEqual(OverlayLayout.collapsedHeight, 80)
-        XCTAssertEqual(OverlayLayout.attachedComposerHeight, 110)
-        XCTAssertEqual(OverlayLayout.expandedHeight, 530)
+        XCTAssertEqual(OverlayLayout.expandedHeight, 490)
         XCTAssertEqual(OverlayLayout.taskHeight, 480)
         XCTAssertEqual(OverlayLayout.controlDiameter, 25.2)
         XCTAssertEqual(OverlayLayout.cornerRadius, 22)
@@ -174,15 +173,59 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertFalse(textOnly.supportsScreenChat)
     }
 
-    func testOverlayLoadingLabelMatchesScreenContext() {
-        XCTAssertEqual(
-            OverlayAnswerView.loadingLabel(includesScreenContext: true),
-            "Reading screen…"
+    func testOverlayProgressStepsFollowWorkPhase() {
+        XCTAssertEqual(OverlayAnswerView.progressSteps(for: .capturing).map(\.title), ["Capturing", "Reading text"])
+        XCTAssertEqual(OverlayAnswerView.progressSteps(for: .capturing).map(\.state), [.active, .pending])
+        XCTAssertEqual(OverlayAnswerView.progressSteps(for: .readingText).map(\.title), ["Captured", "Reading text"])
+        XCTAssertEqual(OverlayAnswerView.progressSteps(for: .readingText).map(\.state), [.done, .active])
+        XCTAssertTrue(OverlayAnswerView.progressSteps(for: .thinking).isEmpty)
+    }
+
+    @MainActor
+    func testStoppingKeepsPartialAnswer() {
+        let model = AppModel(
+            settings: AppSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
+            history: ChatHistoryStore(fileURL: FileManager.default.temporaryDirectory
+                .appending(path: UUID().uuidString)
+                .appending(path: "history.json")),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
         )
-        XCTAssertEqual(
-            OverlayAnswerView.loadingLabel(includesScreenContext: false),
-            "Thinking..."
+        model.conversation.messages = [ChatMessage(role: .user, text: "Why does this fire twice")]
+        model.isWorking = true
+        model.workPhase = .thinking
+        model.streamingResponse = "The effect never"
+
+        model.stopResponse()
+
+        XCTAssertFalse(model.isWorking)
+        XCTAssertNil(model.workPhase)
+        XCTAssertEqual(model.streamingResponse, "")
+        XCTAssertEqual(model.conversation.messages.last?.text, "The effect never")
+        XCTAssertEqual(model.conversation.title, "Why does this fire twice")
+    }
+
+    @MainActor
+    func testAskingAgainReplacesLastAnswerWithScreenshot() {
+        let model = AppModel(
+            settings: AppSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
+            history: ChatHistoryStore(fileURL: FileManager.default.temporaryDirectory
+                .appending(path: UUID().uuidString)
+                .appending(path: "history.json")),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            mockResponse: "Fresh answer"
         )
+        model.conversation.messages = [
+            ChatMessage(role: .user, text: "First"),
+            ChatMessage(role: .assistant, text: "First answer"),
+            ChatMessage(role: .user, text: "Follow-up"),
+            ChatMessage(role: .assistant, text: "Stale answer")
+        ]
+        model.includeScreenshotForNextMessage = false
+
+        model.askAgainWithNewScreenshot()
+
+        XCTAssertEqual(model.conversation.messages.map(\.text), ["First", "First answer", "Follow-up", "Fresh answer"])
+        XCTAssertTrue(model.includeScreenshotForNextMessage)
     }
 
     @MainActor
@@ -200,8 +243,9 @@ final class ScreenSageTests: XCTestCase {
             messages: [],
             streamingResponse: #"Still streaming \(x^2\)"#,
             errorMessage: "",
-            isWorking: true,
-            includesScreenContext: true
+            workPhase: .thinking,
+            attachedScreenshot: nil,
+            askAgain: {}
         ).body
 
         XCTAssertFalse(containsAssistantResponseText(in: body))
@@ -905,24 +949,60 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(event.taskMarker, "Task ID: \(task.id.uuidString)")
     }
 
-    @MainActor
-    func testTaskCalendarBuildsLocaleAwareMonthAndWeekRanges() {
+    func testTaskAgendaBuildsLocaleAwareWeek() {
         var calendar = utcCalendar
         calendar.firstWeekday = 2
 
-        let month = TaskCalendarView.monthDates(
-            containing: date(2026, 8, 13),
-            calendar: calendar
-        )
-        let week = TaskCalendarView.weekDates(
-            containing: date(2026, 8, 13),
-            calendar: calendar
+        let week = TaskAgenda.weekDates(containing: date(2026, 8, 13), calendar: calendar)
+
+        XCTAssertEqual(week, (10...16).map { date(2026, 8, $0, 0) })
+    }
+
+    func testTaskAgendaGroupsSourcesIntoListSections() {
+        let calendar = utcCalendar
+        let now = date(2026, 10, 1, 10)
+        let work = AppleSourceCalendar(id: "work", title: "Work", color: SourceColor(red: 0.8, green: 0.6, blue: 1))
+        let errands = AppleSourceCalendar(id: "errands", title: "Errands", color: SourceColor(red: 1, green: 0.7, blue: 0.4))
+        let items = TaskAgenda.items(
+            tasks: [
+                ScreenieTask(title: "Send invoice", dueDate: date(2026, 10, 1, 11)),
+                ScreenieTask(title: "Overdue essay", dueDate: date(2026, 9, 29, 9)),
+                ScreenieTask(title: "Read notes"),
+                ScreenieTask(title: "Old done", dueDate: date(2026, 9, 20, 9), isCompleted: true, completedAt: date(2026, 9, 20, 10)),
+                ScreenieTask(title: "Done today", dueDate: date(2026, 9, 30, 9), isCompleted: true, completedAt: date(2026, 10, 1, 9))
+            ],
+            reminders: [
+                AppleReminderItem(id: "r1", title: "Dry cleaning", dueDate: date(2026, 10, 2, 17), hasTime: true, list: errands),
+                AppleReminderItem(id: "r2", title: "Passport", dueDate: date(2026, 10, 20, 0), list: errands)
+            ],
+            events: [
+                AppleEventItem(id: "e1", title: "Standup", start: date(2026, 10, 1, 9), end: date(2026, 10, 1, 9).addingTimeInterval(15 * 60), calendar: work),
+                AppleEventItem(id: "e2", title: "Offsite", start: date(2026, 10, 5, 9), end: date(2026, 10, 5, 17), calendar: work)
+            ]
         )
 
-        XCTAssertEqual(month.count, 42)
-        XCTAssertEqual(month.first, date(2026, 7, 27, 0))
-        XCTAssertEqual(month.last, date(2026, 9, 6, 0))
-        XCTAssertEqual(week, (10...16).map { date(2026, 8, $0, 0) })
+        let sections = TaskAgenda.listSections(items, filter: .all, now: now, calendar: calendar)
+
+        XCTAssertEqual(sections.map(\.title), ["Overdue", "Today", "Tomorrow", "Later", "Someday"])
+        XCTAssertEqual(sections[0].items.map(\.title), ["Overdue essay"])
+        XCTAssertEqual(sections[1].items.map(\.title), ["Done today", "Standup", "Send invoice"])
+        XCTAssertEqual(sections[2].items.map(\.title), ["Dry cleaning"])
+        XCTAssertEqual(sections[3].items.map(\.title), ["Passport"])
+        XCTAssertEqual(sections[4].items.map(\.title), ["Read notes"])
+
+        let eventsOnly = TaskAgenda.listSections(items, filter: .events, now: now, calendar: calendar)
+        XCTAssertEqual(eventsOnly.flatMap(\.items).map(\.title), ["Standup"])
+
+        let monday = TaskAgenda.dayItems(items, on: date(2026, 10, 5, 0), calendar: calendar)
+        XCTAssertEqual(monday.map(\.title), ["Offsite"])
+    }
+
+    func testTaskAgendaSkipsCalendarCopiesOfScreenieTasks() {
+        let task = ScreenieTask(title: "Send invoice", dueDate: date(2026, 10, 1, 11))
+
+        XCTAssertTrue(TaskAgenda.isManagedByScreenie(notes: TaskCalendarEvent(task: task).notes))
+        XCTAssertFalse(TaskAgenda.isManagedByScreenie(notes: "Bring slides"))
+        XCTAssertFalse(TaskAgenda.isManagedByScreenie(notes: nil))
     }
 
     @MainActor
