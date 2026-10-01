@@ -3,16 +3,18 @@ import FoundationModels
 
 @Generable
 private struct GeneratedTaskEntry {
-    @Guide(description: "A concise task title with scheduling words removed")
+    @Guide(description: "The task itself in the user's words, without any date or time words")
     let title: String
 
-    @Guide(description: "The due date and time as ISO 8601 with a numeric UTC offset, or nil when no schedule is stated")
-    let dueDateISO8601: String?
+    @Guide(description: "The exact words from the user's text that say when it is due, copied verbatim, such as \"Friday at 6\" or \"tomorrow morning\". Empty when no date or time is stated.")
+    let schedulePhrase: String
 
-    @Guide(description: "Only extra details explicitly stated by the user, or an empty string")
+    @Guide(description: "Extra details copied from the user's text that are neither the task nor its timing, or an empty string")
     let notes: String
 }
 
+/// Parses a task on-device. The model only splits the entry into title, scheduling phrase, and notes;
+/// `TaskDateResolver` turns the phrase into a date, because small models are unreliable at date math.
 struct FoundationModelTaskParser {
     static func parse(
         _ entry: String,
@@ -26,28 +28,22 @@ struct FoundationModelTaskParser {
         }
 
         do {
-            let formatter = ISO8601DateFormatter()
-            formatter.timeZone = timeZone
             let session = LanguageModelSession(instructions: """
-                Extract one task from the user's text.
-                Current local date and time: \(formatter.string(from: now))
-                Time zone: \(timeZone.identifier)
-                Resolve relative dates and times against that context.
-                When a date is given without a time, use 09:00 local time.
-                Do not invent notes or a due date.
+                Split the user's text into one task.
+                Copy words from the text exactly; do not rephrase, translate, or add anything.
+                Put only the words that say when it is due in schedulePhrase.
+                Leave notes empty unless the text has details beyond the task and its timing.
                 """)
             let generated = try await session.respond(
                 to: entry,
-                generating: GeneratedTaskEntry.self
+                generating: GeneratedTaskEntry.self,
+                options: GenerationOptions(sampling: .greedy)
             ).content
-            return reconcileDueDate(
-                in: try makeTask(
-                    title: generated.title,
-                    dueDateISO8601: generated.dueDateISO8601,
-                    notes: generated.notes,
-                    createdAt: now
-                ),
+            return try makeTask(
                 entry: entry,
+                title: generated.title,
+                schedulePhrase: generated.schedulePhrase,
+                notes: generated.notes,
                 now: now,
                 calendar: calendar
             )
@@ -59,58 +55,47 @@ struct FoundationModelTaskParser {
         }
     }
 
+    /// Validates model output against the original entry so nothing invented reaches the task.
     static func makeTask(
-        title: String,
-        dueDateISO8601: String?,
-        notes: String,
-        createdAt: Date = .now
-    ) throws -> ScreenieTask {
-        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { throw TaskEntryParserError.emptyTitle }
-
-        let dueText = dueDateISO8601?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let dueDate: Date?
-        if let dueText, !dueText.isEmpty {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions.insert(.withFractionalSeconds)
-            guard let parsedDate = ISO8601DateFormatter().date(from: dueText)
-                    ?? formatter.date(from: dueText) else {
-                throw TaskEntryParserError.invalidDueDate(dueText)
-            }
-            dueDate = parsedDate
-        } else {
-            dueDate = nil
-        }
-
-        return ScreenieTask(
-            title: title,
-            dueDate: dueDate,
-            notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
-            createdAt: createdAt
-        )
-    }
-
-    static func reconcileDueDate(
-        in task: ScreenieTask,
         entry: String,
+        title: String,
+        schedulePhrase: String,
+        notes: String,
         now: Date,
         calendar: Calendar
-    ) -> ScreenieTask {
-        var corrected = task
-        let words = entry.split(whereSeparator: \Character.isWhitespace)
-        let anchor = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: now) ?? now
+    ) throws -> ScreenieTask {
+        let entry = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+        let phrase = schedulePhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = try TaskEntryParser.parse(entry, now: now, calendar: calendar)
 
-        for count in [2, 1] where words.count >= count {
-            let suffix = words.suffix(count).joined(separator: " ")
-            if let dueDate = try? TaskEntryParser.parse(
-                "Task due \(suffix)",
-                now: anchor,
-                calendar: calendar
-            ).dueDate {
-                corrected.dueDate = dueDate
-                break
+        // Trust the phrase only if it really appears in the entry and resolves to a date.
+        var dueDate: Date?
+        var cleanedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !phrase.isEmpty, entry.range(of: phrase, options: .caseInsensitive) != nil {
+            dueDate = TaskDateResolver.resolve(phrase, now: now, calendar: calendar)
+            if let range = cleanedTitle.range(of: phrase, options: .caseInsensitive) {
+                cleanedTitle.removeSubrange(range)
             }
         }
-        return corrected
+        if dueDate == nil, let fallbackDate = fallback.dueDate {
+            // The model missed or invented the timing, so its title likely still holds the date words.
+            dueDate = fallbackDate
+            cleanedTitle = fallback.title
+        }
+
+        cleanedTitle = TaskDateResolver.trimConnectors(
+            cleanedTitle.split(whereSeparator: \.isWhitespace).map(String.init)
+        )
+        if cleanedTitle.isEmpty { cleanedTitle = fallback.title }
+        guard !cleanedTitle.isEmpty else { throw TaskEntryParserError.emptyTitle }
+
+        var cleanedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if entry.range(of: cleanedNotes, options: .caseInsensitive) == nil
+            || cleanedNotes.caseInsensitiveCompare(cleanedTitle) == .orderedSame
+            || cleanedNotes.caseInsensitiveCompare(phrase) == .orderedSame {
+            cleanedNotes = ""
+        }
+
+        return ScreenieTask(title: cleanedTitle, dueDate: dueDate, notes: cleanedNotes, createdAt: now)
     }
 }

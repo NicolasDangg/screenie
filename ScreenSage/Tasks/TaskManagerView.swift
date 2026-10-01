@@ -4,8 +4,9 @@ struct TaskManagerView: View {
     @Bindable var model: AppModel
     @State private var viewMode = TaskViewMode.list
     @State private var filter = TaskAgendaFilter.all
+    /// Just-completed rows that stay in place for a moment before moving to Completed.
+    @State private var lingering: Set<String> = []
     @State private var selectedDay = Date.now
-    @State private var entry = ""
     @State private var isAddingTask = false
     @State private var pendingDeletion: ScreenieTask?
     @FocusState private var entryIsFocused: Bool
@@ -27,7 +28,13 @@ struct TaskManagerView: View {
 
             if viewMode == .list {
                 TaskListView(
-                    sections: TaskAgenda.listSections(items, filter: filter, now: .now, calendar: .autoupdatingCurrent),
+                    sections: TaskAgenda.listSections(
+                        items,
+                        filter: filter,
+                        lingering: lingering,
+                        now: .now,
+                        calendar: .autoupdatingCurrent
+                    ),
                     filter: $filter,
                     schedule: model.taskSchedule,
                     errorMessage: errorMessage,
@@ -37,7 +44,7 @@ struct TaskManagerView: View {
                     didAddScheduleToCalendar: model.didAddTaskScheduleToCalendar,
                     needsConnection: sources.needsConnection,
                     connect: { Task { await sources.requestAccess() } },
-                    toggleCompletion: model.toggleCompletion(of:),
+                    toggleCompletion: toggleInList,
                     updateDueDate: model.taskStore.updateDueDate,
                     requestDelete: requestDelete,
                     dismissSchedule: model.dismissTaskSchedule,
@@ -166,7 +173,7 @@ struct TaskManagerView: View {
                 .foregroundStyle(.secondary)
                 .help("Add task with details")
 
-            TextField("Call mom Friday at 6…", text: $entry)
+            TextField("Call mom Friday at 6…", text: $model.taskEntry)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .focused($entryIsFocused)
@@ -227,14 +234,23 @@ struct TaskManagerView: View {
     }
 
     private func submitEntry() {
-        let text = entry
-        entry = ""
-        model.addTask(entry: text)
+        model.addTask(entry: model.taskEntry)
     }
 
     private func showScheduleHint() {
         viewMode = .list
         model.requestScheduleHint()
+    }
+
+    private func toggleInList(_ item: TaskAgendaItem) {
+        if !item.isCompleted {
+            lingering.insert(item.id)
+            Task {
+                try? await Task.sleep(for: .seconds(0.9))
+                lingering.remove(item.id)
+            }
+        }
+        model.toggleCompletion(of: item)
     }
 
     private func requestDelete(_ task: ScreenieTask) {

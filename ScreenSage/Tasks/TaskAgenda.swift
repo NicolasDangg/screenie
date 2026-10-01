@@ -102,6 +102,7 @@ struct TaskAgendaSection: Identifiable, Equatable {
         case day(Date)
         case later
         case someday
+        case completed
     }
 
     let kind: Kind
@@ -128,10 +129,12 @@ enum TaskAgenda {
     }
 
     /// Groups items for the list view: overdue, each of the next seven days, later, and undated.
-    /// Completed items only appear on the day they were completed, and events only for today and tomorrow.
+    /// Items completed today collect in a final Completed section, except ids in `lingering`, which stay put
+    /// briefly so the checkmark animation can play. Events only appear for today and tomorrow.
     static func listSections(
         _ items: [TaskAgendaItem],
         filter: TaskAgendaFilter,
+        lingering: Set<String> = [],
         now: Date,
         calendar: Calendar
     ) -> [TaskAgendaSection] {
@@ -144,10 +147,15 @@ enum TaskAgenda {
         var days: [Date: [TaskAgendaItem]] = [:]
         var later: [TaskAgendaItem] = []
         var someday: [TaskAgendaItem] = []
+        var completed: [TaskAgendaItem] = []
 
         for item in items where filter.includes(item.kind) {
-            if item.isCompleted, !(item.completedAt.map { calendar.isDate($0, inSameDayAs: now) } ?? false) {
-                continue
+            if item.isCompleted {
+                guard item.completedAt.map({ calendar.isDate($0, inSameDayAs: now) }) ?? false else { continue }
+                if !lingering.contains(item.id) {
+                    completed.append(item)
+                    continue
+                }
             }
             guard let date = item.date else {
                 if item.kind != .event { someday.append(item) }
@@ -160,7 +168,7 @@ enum TaskAgenda {
                 continue
             }
             if date < today {
-                if item.isCompleted { days[today, default: []].append(item) } else { overdue.append(item) }
+                overdue.append(item)
             } else if date < weekEnd {
                 days[calendar.startOfDay(for: date), default: []].append(item)
             } else {
@@ -188,6 +196,10 @@ enum TaskAgenda {
         if !someday.isEmpty {
             let byTitle = someday.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
             sections.append(TaskAgendaSection(kind: .someday, title: "Someday", items: byTitle))
+        }
+        if !completed.isEmpty {
+            let newestFirst = completed.sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
+            sections.append(TaskAgendaSection(kind: .completed, title: "Completed", items: newestFirst))
         }
         return sections
     }

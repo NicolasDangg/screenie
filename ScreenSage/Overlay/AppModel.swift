@@ -25,6 +25,8 @@ final class AppModel {
     var isAddingTaskScheduleToCalendar = false
     var didAddTaskScheduleToCalendar = false
     var isParsingTask = false
+    /// Text in the task panel's inline field; kept after a failed parse so it can be corrected.
+    var taskEntry = ""
     var includeScreenshotForNextMessage = true
     var attachedScreenshot: Data?
     var expandedChatSize = CGSize(width: OverlayLayout.collapsedWidth, height: OverlayLayout.expandedHeight)
@@ -418,6 +420,7 @@ final class AppModel {
                 try Task.checkCancellation()
                 guard taskParsingID == parsingID else { return }
                 try await add(task)
+                if taskEntry.trimmingCharacters(in: .whitespacesAndNewlines) == entry { taskEntry = "" }
             } catch is CancellationError {
             } catch {
                 guard taskParsingID == parsingID else { return }

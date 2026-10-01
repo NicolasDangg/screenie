@@ -27,7 +27,6 @@ struct TaskSourceMark: View {
 }
 
 struct TaskRowView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let item: TaskAgendaItem
     let timeLabel: String
     var isHighlighted = false
@@ -39,9 +38,9 @@ struct TaskRowView: View {
     @State private var isShowingDetails = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
             leadingControl
-                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24)
 
             titleView
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -63,8 +62,9 @@ struct TaskRowView: View {
             .foregroundStyle(.secondary)
             .frame(width: 92, alignment: .leading)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.leading, 5)
+        .padding(.trailing, 8)
+        .padding(.vertical, 3)
         .background {
             if isHighlighted || isHovered {
                 RoundedRectangle(cornerRadius: 9).fill(.primary.opacity(isHovered ? 0.07 : 0.05))
@@ -86,28 +86,21 @@ struct TaskRowView: View {
                 .foregroundStyle(item.tint)
                 .accessibilityHidden(true)
         } else {
-            Button(action: toggleCompletion) {
-                if item.isCompleted {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 17))
-                        .foregroundStyle(.secondary)
-                } else {
-                    Circle()
-                        .strokeBorder(item.kind == .reminder ? item.tint : Color.secondary, lineWidth: 1.5)
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(item.isCompleted ? "Mark incomplete" : "Mark complete")
+            TaskCheckbox(
+                isOn: item.isCompleted,
+                tint: item.tint,
+                ringColor: item.kind == .reminder ? item.tint : .secondary,
+                action: toggleCompletion
+            )
         }
     }
 
     @ViewBuilder private var titleView: some View {
-        let title = Text(item.title)
-            .font(.system(size: 13.5))
-            .foregroundStyle(item.isCompleted || item.kind == .event ? .secondary : .primary)
-            .strikethrough(item.isCompleted)
-            .lineLimit(1)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: item.isCompleted)
+        let title = CompletableTitle(
+            title: item.title,
+            isCompleted: item.isCompleted,
+            isDimmed: item.kind == .event
+        )
 
         if let task = item.task {
             Button { isShowingDetails = true } label: {

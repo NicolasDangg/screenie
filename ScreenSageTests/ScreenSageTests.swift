@@ -715,67 +715,114 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertThrowsError(try TaskEntryParser.parse("Essay due 999999999999999999999999-08-20"))
     }
 
-    func testFoundationModelOutputBuildsValidatedTask() throws {
-        let dueDateText = "2026-08-18T14:30:00+07:00"
-        let task = try FoundationModelTaskParser.makeTask(
-            title: "  Physics homework  ",
-            dueDateISO8601: dueDateText,
-            notes: "  Unit 3  ",
-            createdAt: date(2026, 8, 13)
-        )
+    func testTaskDateResolverReadsCommonPhrases() {
+        // Thursday 1 October 2026, 10:00 UTC.
+        let now = date(2026, 10, 1, 10)
+        func resolve(_ phrase: String) -> Date? {
+            TaskDateResolver.resolve(phrase, now: now, calendar: utcCalendar)
+        }
 
-        XCTAssertEqual(task.title, "Physics homework")
-        XCTAssertEqual(task.dueDate, ISO8601DateFormatter().date(from: dueDateText))
-        XCTAssertEqual(task.notes, "Unit 3")
-        XCTAssertEqual(task.createdAt, date(2026, 8, 13))
-        let fractionalDateTask = try FoundationModelTaskParser.makeTask(
-            title: "Physics homework",
-            dueDateISO8601: "2026-08-18T14:30:00.500+07:00",
-            notes: ""
+        XCTAssertEqual(resolve("Friday at 6"), date(2026, 10, 2, 18))
+        XCTAssertEqual(resolve("tomorrow 5pm"), date(2026, 10, 2, 17))
+        XCTAssertEqual(resolve("5:30 pm tomorrow"), date(2026, 10, 2, 17).addingTimeInterval(30 * 60))
+        XCTAssertEqual(resolve("tomorrow morning"), date(2026, 10, 2, 9))
+        XCTAssertEqual(resolve("tonight"), date(2026, 10, 1, 20))
+        XCTAssertEqual(resolve("at noon"), date(2026, 10, 1, 12))
+        XCTAssertEqual(resolve("at 9"), date(2026, 10, 2, 9), "A time already past today means tomorrow")
+        XCTAssertEqual(resolve("in 3 days"), date(2026, 10, 4, 9))
+        XCTAssertEqual(resolve("next week"), date(2026, 10, 4, 9))
+        XCTAssertEqual(resolve("Oct 14"), date(2026, 10, 14, 9))
+        XCTAssertEqual(resolve("14th of October at 8am"), date(2026, 10, 14, 8))
+        XCTAssertEqual(resolve("Jan 5"), date(2027, 1, 5, 9))
+        XCTAssertEqual(resolve("due on next tue"), date(2026, 10, 6, 9))
+        XCTAssertEqual(resolve("2026-11-03"), date(2026, 11, 3, 9))
+        XCTAssertNil(resolve("eventually"))
+        XCTAssertNil(resolve("after class"))
+        XCTAssertNil(resolve("Feb 30"))
+        XCTAssertNil(resolve("at 25:00"))
+    }
+
+    func testTaskEntryParserSplitsTitleFromSchedule() throws {
+        let now = date(2026, 10, 1, 10)
+
+        let call = try TaskEntryParser.parse("Call mom Friday at 6", now: now, calendar: utcCalendar)
+        XCTAssertEqual(call.title, "Call mom")
+        XCTAssertEqual(call.dueDate, date(2026, 10, 2, 18))
+
+        let leading = try TaskEntryParser.parse("tomorrow buy oat milk", now: now, calendar: utcCalendar)
+        XCTAssertEqual(leading.title, "buy oat milk")
+        XCTAssertEqual(leading.dueDate, date(2026, 10, 2, 9))
+
+        let numbered = try TaskEntryParser.parse("Read chapter 3", now: now, calendar: utcCalendar)
+        XCTAssertEqual(numbered.title, "Read chapter 3")
+        XCTAssertNil(numbered.dueDate)
+    }
+
+    func testFoundationModelOutputIsCheckedAgainstTheEntry() throws {
+        let now = date(2026, 10, 1, 10)
+
+        let task = try FoundationModelTaskParser.makeTask(
+            entry: "Dentist Friday at 6 bring insurance card",
+            title: "Dentist",
+            schedulePhrase: "Friday at 6",
+            notes: "bring insurance card",
+            now: now,
+            calendar: utcCalendar
         )
-        XCTAssertEqual(
-            try XCTUnwrap(fractionalDateTask.dueDate).timeIntervalSince1970,
-            try XCTUnwrap(task.dueDate).timeIntervalSince1970 + 0.5,
-            accuracy: 0.001
+        XCTAssertEqual(task.title, "Dentist")
+        XCTAssertEqual(task.dueDate, date(2026, 10, 2, 18))
+        XCTAssertEqual(task.notes, "bring insurance card")
+        XCTAssertEqual(task.createdAt, now)
+
+        // A phrase or notes the model invented are ignored; the title loses any leftover schedule words.
+        let invented = try FoundationModelTaskParser.makeTask(
+            entry: "Call mom tomorrow",
+            title: "Call mom tomorrow",
+            schedulePhrase: "next Monday",
+            notes: "Remember her birthday",
+            now: now,
+            calendar: utcCalendar
         )
+        XCTAssertEqual(invented.title, "Call mom")
+        XCTAssertEqual(invented.dueDate, date(2026, 10, 2, 9))
+        XCTAssertEqual(invented.notes, "")
+
+        let leftoverWords = try FoundationModelTaskParser.makeTask(
+            entry: "Submit essay by Oct 14",
+            title: "Submit essay by Oct 14",
+            schedulePhrase: "Oct 14",
+            notes: "",
+            now: now,
+            calendar: utcCalendar
+        )
+        XCTAssertEqual(leftoverWords.title, "Submit essay")
+        XCTAssertEqual(leftoverWords.dueDate, date(2026, 10, 14, 9))
+
         XCTAssertThrowsError(try FoundationModelTaskParser.makeTask(
-            title: "  ",
-            dueDateISO8601: nil,
-            notes: ""
-        ))
-        XCTAssertThrowsError(try FoundationModelTaskParser.makeTask(
-            title: "Physics",
-            dueDateISO8601: "next whenever",
-            notes: ""
+            entry: "  ",
+            title: " ",
+            schedulePhrase: "",
+            notes: "",
+            now: now,
+            calendar: utcCalendar
         ))
     }
 
-    func testFoundationModelParserHonorsExplicitTaskDateSuffix() throws {
-        let generated = ScreenieTask(
-            title: "Physics deadline",
-            dueDate: date(2026, 8, 17),
-            notes: "Next Tuesday"
+    func testPendingReminderCompletionSurvivesRefresh() {
+        let list = AppleSourceCalendar(id: "errands", title: "Errands", color: SourceColor(red: 1, green: 0.7, blue: 0.4))
+        let fetched = [
+            AppleReminderItem(id: "a", title: "Dry cleaning", list: list),
+            AppleReminderItem(id: "b", title: "Oat milk", list: list)
+        ]
+        let completedAt = date(2026, 10, 1, 10)
+
+        let shown = AppleTaskSources.applying(
+            ["a": AppleTaskSources.PendingCompletion(completed: true, completedAt: completedAt)],
+            to: fetched
         )
 
-        let corrected = FoundationModelTaskParser.reconcileDueDate(
-            in: generated,
-            entry: "physics deadline next tue",
-            now: date(2026, 8, 13, 20),
-            calendar: utcCalendar
-        )
-
-        XCTAssertEqual(corrected.dueDate, date(2026, 8, 18))
-        XCTAssertEqual(corrected.title, generated.title)
-        XCTAssertEqual(corrected.notes, generated.notes)
-        XCTAssertEqual(
-            FoundationModelTaskParser.reconcileDueDate(
-                in: generated,
-                entry: "physics deadline after class",
-                now: date(2026, 8, 13, 20),
-                calendar: utcCalendar
-            ).dueDate,
-            generated.dueDate
-        )
+        XCTAssertEqual(shown.map(\.isCompleted), [true, false])
+        XCTAssertEqual(shown.first?.completedAt, completedAt)
     }
 
     @MainActor
@@ -958,7 +1005,7 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(week, (10...16).map { date(2026, 8, $0, 0) })
     }
 
-    func testTaskAgendaGroupsSourcesIntoListSections() {
+    func testTaskAgendaGroupsSourcesIntoListSections() throws {
         let calendar = utcCalendar
         let now = date(2026, 10, 1, 10)
         let work = AppleSourceCalendar(id: "work", title: "Work", color: SourceColor(red: 0.8, green: 0.6, blue: 1))
@@ -983,9 +1030,16 @@ final class ScreenSageTests: XCTestCase {
 
         let sections = TaskAgenda.listSections(items, filter: .all, now: now, calendar: calendar)
 
-        XCTAssertEqual(sections.map(\.title), ["Overdue", "Today", "Tomorrow", "Later", "Someday"])
+        XCTAssertEqual(sections.map(\.title), ["Overdue", "Today", "Tomorrow", "Later", "Someday", "Completed"])
         XCTAssertEqual(sections[0].items.map(\.title), ["Overdue essay"])
-        XCTAssertEqual(sections[1].items.map(\.title), ["Done today", "Standup", "Send invoice"])
+        XCTAssertEqual(sections[5].items.map(\.title), ["Done today"])
+
+        // A just-ticked item stays in its section while it is lingering.
+        let doneToday = try XCTUnwrap(items.first { $0.title == "Done today" })
+        let lingering = TaskAgenda.listSections(items, filter: .all, lingering: [doneToday.id], now: now, calendar: calendar)
+        XCTAssertEqual(lingering.first?.items.map(\.title), ["Overdue essay", "Done today"])
+        XCTAssertFalse(lingering.contains { $0.kind == .completed })
+        XCTAssertEqual(sections[1].items.map(\.title), ["Standup", "Send invoice"])
         XCTAssertEqual(sections[2].items.map(\.title), ["Dry cleaning"])
         XCTAssertEqual(sections[3].items.map(\.title), ["Passport"])
         XCTAssertEqual(sections[4].items.map(\.title), ["Read notes"])

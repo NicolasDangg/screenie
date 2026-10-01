@@ -53,6 +53,7 @@ final class AppleTaskSources {
     private let calendar: Calendar
     private var eventRange: DateInterval
     private var refreshTask: Task<Void, Never>?
+    private var pendingCompletions: [String: PendingCompletion] = [:]
     private var changeObserver: NSObjectProtocol?
 
     init(
@@ -171,18 +172,19 @@ final class AppleTaskSources {
 
         guard !Task.isCancelled else { return }
         reminderLists = lists
-        reminders = fetchedReminders
+        reminders = Self.applying(pendingCompletions, to: fetchedReminders)
         eventCalendars = calendars
         events = fetchedEvents
         lastRefreshed = .now
     }
 
+    /// Shows the change immediately and keeps it through any refresh until EventKit has saved it,
+    /// so a refresh that lands mid-save can't flip the checkbox back.
     func setReminder(_ reminder: AppleReminderItem, completed: Bool) {
         guard let client else { return }
-        if let index = reminders.firstIndex(where: { $0.id == reminder.id }) {
-            reminders[index].isCompleted = completed
-            reminders[index].completedAt = completed ? .now : nil
-        }
+        let change = PendingCompletion(completed: completed, completedAt: completed ? .now : nil)
+        pendingCompletions[reminder.id] = change
+        reminders = Self.applying(pendingCompletions, to: reminders)
         Task {
             do {
                 try await client.setReminder(reminder.id, completed: completed)
@@ -190,7 +192,29 @@ final class AppleTaskSources {
             } catch {
                 errorMessage = "Could not update Reminders: \(error.localizedDescription)"
             }
+            if pendingCompletions[reminder.id] == change {
+                pendingCompletions[reminder.id] = nil
+            }
             await refresh()
+        }
+    }
+
+    struct PendingCompletion: Equatable {
+        let id = UUID()
+        let completed: Bool
+        let completedAt: Date?
+    }
+
+    nonisolated static func applying(
+        _ pending: [String: PendingCompletion],
+        to reminders: [AppleReminderItem]
+    ) -> [AppleReminderItem] {
+        reminders.map { reminder in
+            guard let change = pending[reminder.id] else { return reminder }
+            var updated = reminder
+            updated.isCompleted = change.completed
+            updated.completedAt = change.completedAt
+            return updated
         }
     }
 

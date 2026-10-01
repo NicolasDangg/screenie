@@ -117,22 +117,16 @@ struct TaskCalendarView: View {
             case .event:
                 TaskSourceMark(kind: .event, tint: item.tint)
             case .task, .reminder:
-                Button { toggleCompletion(item) } label: {
-                    if item.isCompleted {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
-                    } else {
-                        Circle()
-                            .strokeBorder(item.kind == .reminder ? item.tint : Color.secondary, lineWidth: 1.5)
-                            .frame(width: 13, height: 13)
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.isCompleted ? "Mark incomplete" : "Mark complete")
+                TaskCheckbox(
+                    isOn: item.isCompleted,
+                    tint: item.tint,
+                    ringColor: item.kind == .reminder ? item.tint : .secondary,
+                    size: 14
+                ) { toggleCompletion(item) }
+                .padding(.vertical, -5)
+                .padding(.horizontal, -4)
             }
-            Text(item.title)
-                .strikethrough(item.isCompleted)
-                .foregroundStyle(item.isCompleted ? .secondary : .primary)
-                .lineLimit(1)
+            CompletableTitle(title: item.title, isCompleted: item.isCompleted, fontSize: 13)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(detail(for: item))
                 .font(.system(size: 11.5))

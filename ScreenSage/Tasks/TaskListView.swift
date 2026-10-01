@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct TaskListView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showsCompleted = false
     let sections: [TaskAgendaSection]
     @Binding var filter: TaskAgendaFilter
     let schedule: TaskSchedule?
@@ -44,14 +46,8 @@ struct TaskListView: View {
                 } else {
                     ForEach(sections) { section in
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(section.title)
-                                .font(.system(size: 11, weight: .semibold))
-                                .textCase(.uppercase)
-                                .tracking(0.4)
-                                .foregroundStyle(section.kind == .overdue ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                                .padding(.horizontal, 8)
-                                .padding(.bottom, 4)
-                            ForEach(section.items) { item in
+                            sectionHeader(section)
+                            ForEach(section.kind == .completed && !showsCompleted ? [] : section.items) { item in
                                 TaskRowView(
                                     item: item,
                                     timeLabel: Self.timeLabel(for: item, in: section.kind),
@@ -82,9 +78,44 @@ struct TaskListView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 10)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: sections)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: showsCompleted)
         }
         .scrollIndicators(.hidden)
         .frame(maxHeight: .infinity)
+    }
+
+    @ViewBuilder private func sectionHeader(_ section: TaskAgendaSection) -> some View {
+        let title = Text(section.title)
+            .font(.system(size: 11, weight: .semibold))
+            .textCase(.uppercase)
+            .tracking(0.4)
+        if section.kind == .completed {
+            Button {
+                showsCompleted.toggle()
+            } label: {
+                HStack(spacing: 5) {
+                    title
+                    Text("\(section.items.count)")
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(showsCompleted ? 90 : 0))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(showsCompleted ? "Hide completed" : "Show \(section.items.count) completed")
+        } else {
+            title
+                .foregroundStyle(section.kind == .overdue ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+        }
     }
 
     private var filterBar: some View {
@@ -136,6 +167,8 @@ struct TaskListView: View {
             return item.hasTime
                 ? date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
                 : date.formatted(.dateTime.month(.abbreviated).day())
+        case .completed:
+            return ""
         case .day, .someday:
             guard item.hasTime else { return item.kind == .event ? "All day" : "" }
             let start = date.formatted(date: .omitted, time: .shortened)
