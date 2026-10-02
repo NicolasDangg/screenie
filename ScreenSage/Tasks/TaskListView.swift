@@ -13,9 +13,7 @@ struct TaskListView: View {
     let didAddScheduleToCalendar: Bool
     let needsConnection: Bool
     let connect: () -> Void
-    let toggleCompletion: (TaskAgendaItem) -> Void
-    let updateDueDate: (UUID, Date?) -> Void
-    let requestDelete: (ScreenieTask) -> Void
+    let actions: TaskItemActions
     let dismissSchedule: () -> Void
     let addScheduleToCalendar: () -> Void
 
@@ -51,9 +49,7 @@ struct TaskListView: View {
                                 TaskRowView(
                                     item: item,
                                     timeLabel: Self.timeLabel(for: item, in: section.kind),
-                                    toggleCompletion: { toggleCompletion(item) },
-                                    updateDueDate: updateDueDate,
-                                    delete: requestDelete
+                                    actions: actions
                                 )
                             }
                         }

@@ -47,39 +47,53 @@ struct AppleSourceCalendar: Identifiable, Equatable, Sendable {
 struct AppleReminderItem: Identifiable, Equatable, Sendable {
     let id: String
     var title: String
+    var notes: String
     var dueDate: Date?
     var hasTime: Bool
     var isCompleted: Bool
     var completedAt: Date?
     var list: AppleSourceCalendar
+    /// Opens this reminder in the Reminders app.
+    var appURL: URL?
 
     init(
         id: String,
         title: String,
+        notes: String = "",
         dueDate: Date? = nil,
         hasTime: Bool = false,
         isCompleted: Bool = false,
         completedAt: Date? = nil,
-        list: AppleSourceCalendar
+        list: AppleSourceCalendar,
+        appURL: URL? = nil
     ) {
         self.id = id
         self.title = title
+        self.notes = notes
         self.dueDate = dueDate
         self.hasTime = hasTime
         self.isCompleted = isCompleted
         self.completedAt = completedAt
         self.list = list
+        self.appURL = appURL
     }
 
     init(_ reminder: EKReminder) {
         let components = reminder.dueDateComponents
         id = reminder.calendarItemIdentifier
         title = reminder.title ?? ""
+        notes = reminder.notes ?? ""
         dueDate = components.flatMap { ($0.calendar ?? .current).date(from: $0) }
         hasTime = components?.hour != nil
         isCompleted = reminder.isCompleted
         completedAt = reminder.completionDate
         list = AppleSourceCalendar(reminder.calendar)
+        appURL = Self.appURL(calendarItemID: reminder.calendarItemIdentifier)
+    }
+
+    /// The Reminders app's own deep link; there is no public API for showing a reminder.
+    static func appURL(calendarItemID: String) -> URL? {
+        URL(string: "x-apple-reminderkit://REMCDReminder/\(calendarItemID)")
     }
 }
 
@@ -90,14 +104,25 @@ struct AppleEventItem: Identifiable, Equatable, Sendable {
     var end: Date
     var isAllDay: Bool
     var calendar: AppleSourceCalendar
+    /// Opens this event (or occurrence) in the Calendar app.
+    var appURL: URL?
 
-    init(id: String, title: String, start: Date, end: Date, isAllDay: Bool = false, calendar: AppleSourceCalendar) {
+    init(
+        id: String,
+        title: String,
+        start: Date,
+        end: Date,
+        isAllDay: Bool = false,
+        calendar: AppleSourceCalendar,
+        appURL: URL? = nil
+    ) {
         self.id = id
         self.title = title
         self.start = start
         self.end = end
         self.isAllDay = isAllDay
         self.calendar = calendar
+        self.appURL = appURL
     }
 
     init(_ event: EKEvent) {
@@ -108,6 +133,31 @@ struct AppleEventItem: Identifiable, Equatable, Sendable {
         end = event.endDate
         isAllDay = event.isAllDay
         calendar = AppleSourceCalendar(event.calendar)
+        appURL = Self.appURL(
+            calendarItemID: event.calendarItemIdentifier,
+            occurrenceStart: event.hasRecurrenceRules ? event.startDate : nil,
+            isAllDay: event.isAllDay
+        )
+    }
+
+    /// Calendar's own deep link. Recurring events need the occurrence start, written in UTC for timed
+    /// events and as local wall-clock time for all-day ones; both use a literal trailing `Z`.
+    static func appURL(
+        calendarItemID: String,
+        occurrenceStart: Date?,
+        isAllDay: Bool,
+        timeZone: TimeZone = .current
+    ) -> URL? {
+        var path = ""
+        if let occurrenceStart {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.timeZone = isAllDay ? timeZone : TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+            path = "/\(formatter.string(from: occurrenceStart))"
+        }
+        return URL(string: "ical://ekevent\(path)/\(calendarItemID)?method=show&options=more")
     }
 }
 
@@ -179,24 +229,46 @@ actor AppleEventKitClient {
         try store.save(reminder, commit: true)
     }
 
-    func addReminder(title: String, dueDate: Date?, notes: String, listID: String) throws {
-        guard let list = store.calendar(withIdentifier: listID) ?? store.defaultCalendarForNewReminders() else {
-            throw Self.error("No Reminders list is available.")
+    /// Saves to exactly `listID`; never falls back to another list, so nothing lands somewhere unexpected.
+    func addReminder(title: String, dueDate: Date?, notes: String, listID: String) throws -> URL? {
+        guard let list = store.calendar(withIdentifier: listID), list.allowedEntityTypes.contains(.reminder) else {
+            throw Self.error("That Reminders list is no longer available.")
         }
         let reminder = EKReminder(eventStore: store)
         reminder.calendar = list
         reminder.title = title
         reminder.notes = notes.isEmpty ? nil : notes
-        if let dueDate {
-            reminder.dueDateComponents = Calendar.current.dateComponents(
-                [.year, .month, .day, .hour, .minute],
-                from: dueDate
-            )
+        reminder.dueDateComponents = Self.dueDateComponents(dueDate, hasTime: true)
+        try store.save(reminder, commit: true)
+        return AppleReminderItem.appURL(calendarItemID: reminder.calendarItemIdentifier)
+    }
+
+    func updateReminder(_ id: String, title: String, notes: String, dueDate: Date?, hasTime: Bool) throws {
+        guard let reminder = store.calendarItem(withIdentifier: id) as? EKReminder else {
+            throw Self.error("That reminder no longer exists.")
         }
+        let components = Self.dueDateComponents(dueDate, hasTime: hasTime)
+        if components != reminder.dueDateComponents {
+            // Reminders' time-based alert sits at the old due time; move it with the date instead of leaving it behind.
+            let timedAlarms = reminder.alarms?.filter { $0.absoluteDate != nil } ?? []
+            timedAlarms.forEach(reminder.removeAlarm)
+            if !timedAlarms.isEmpty, hasTime, let dueDate {
+                reminder.addAlarm(EKAlarm(absoluteDate: dueDate))
+            }
+            reminder.dueDateComponents = components
+        }
+        reminder.title = title
+        reminder.notes = notes.isEmpty ? nil : notes
         try store.save(reminder, commit: true)
     }
 
-    func addEvent(_ event: ParsedEvent, calendarID: String) throws {
+    nonisolated static func dueDateComponents(_ date: Date?, hasTime: Bool) -> DateComponents? {
+        guard let date else { return nil }
+        let units: Set<Calendar.Component> = hasTime ? [.year, .month, .day, .hour, .minute] : [.year, .month, .day]
+        return Calendar.current.dateComponents(units, from: date)
+    }
+
+    func addEvent(_ event: ParsedEvent, calendarID: String) throws -> URL? {
         guard let calendar = store.calendar(withIdentifier: calendarID), calendar.allowsContentModifications else {
             throw Self.error("That calendar can't take new events.")
         }
@@ -208,6 +280,11 @@ actor AppleEventKitClient {
         newEvent.isAllDay = event.isAllDay
         newEvent.notes = event.notes.isEmpty ? nil : event.notes
         try store.save(newEvent, span: .thisEvent, commit: true)
+        return AppleEventItem.appURL(
+            calendarItemID: newEvent.calendarItemIdentifier,
+            occurrenceStart: nil,
+            isAllDay: newEvent.isAllDay
+        )
     }
 
     private func fetchReminders(matching predicate: NSPredicate) async -> [AppleReminderItem] {

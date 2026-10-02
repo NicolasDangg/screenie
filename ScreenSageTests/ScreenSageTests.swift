@@ -179,7 +179,8 @@ final class ScreenSageTests: XCTestCase {
             history: ChatHistoryStore(fileURL: FileManager.default.temporaryDirectory
                 .appending(path: UUID().uuidString)
                 .appending(path: "history.json")),
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated
         )
         model.conversation.messages = [ChatMessage(role: .user, text: "Why does this fire twice")]
         model.isWorking = true
@@ -203,6 +204,7 @@ final class ScreenSageTests: XCTestCase {
                 .appending(path: UUID().uuidString)
                 .appending(path: "history.json")),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             mockResponse: "Fresh answer"
         )
         model.conversation.messages = [
@@ -296,7 +298,8 @@ final class ScreenSageTests: XCTestCase {
         let settings = AppSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!)
         let controller = OverlayPanelController(model: AppModel(
             settings: settings,
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated
         ))
         let screen = try XCTUnwrap(
             NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
@@ -380,6 +383,7 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             mockResponse: "Response"
         )
         let controller = OverlayPanelController(model: model, defaults: UserDefaults(suiteName: UUID().uuidString)!)
@@ -442,6 +446,7 @@ final class ScreenSageTests: XCTestCase {
                 .appending(path: UUID().uuidString)
                 .appending(path: "history.json")),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             mockResponse: "Follow-up answer"
         )
         let saved = Conversation(
@@ -498,7 +503,8 @@ final class ScreenSageTests: XCTestCase {
         let existingPanels = Set(NSApp.windows.compactMap { $0 as? KeyablePanel }.map { ObjectIdentifier($0) })
         let controller = OverlayPanelController(model: AppModel(
             settings: AppSettings(),
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated
         ))
 
         XCTAssertFalse(controller.isPresented)
@@ -518,7 +524,8 @@ final class ScreenSageTests: XCTestCase {
         let existingPanels = Set(NSApp.windows.compactMap { $0 as? KeyablePanel }.map { ObjectIdentifier($0) })
         let controller = OverlayPanelController(model: AppModel(
             settings: AppSettings(),
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated
         ))
 
         controller.showTasks()
@@ -538,6 +545,7 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             mockResponse: "Answer",
             conversationGracePeriod: 2
         )
@@ -584,7 +592,8 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(),
             history: ChatHistoryStore(fileURL: fileURL),
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated
         )
         model.prompt = "Draft"
         model.conversation = Conversation(
@@ -611,6 +620,7 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(defaults: defaults),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             mockResponse: "**Answer:** The closure captures `count`."
         )
         model.prompt = "Explain this code"
@@ -645,6 +655,7 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             mockResponse: "Answer"
         )
 
@@ -920,8 +931,9 @@ final class ScreenSageTests: XCTestCase {
         defaults.set("legacy-list", forKey: "tasks.newTaskReminderList")
         let sources = AppleTaskSources(defaults: defaults, client: nil)
         XCTAssertEqual(sources.newItemDestination, .reminders("legacy-list"))
-        // The list isn't reachable here, so new items fall back to screenie.
-        XCTAssertEqual(sources.effectiveDestination, .screenie)
+        // The list isn't reachable here; saving must fail rather than quietly land in screenie.
+        XCTAssertTrue(sources.destinationIsUnavailable)
+        XCTAssertThrowsError(try sources.resolvedDestination())
 
         sources.newItemDestination = .calendar("work")
         XCTAssertEqual(AppleTaskSources(defaults: defaults, client: nil).newItemDestination, .calendar("work"))
@@ -1036,7 +1048,9 @@ final class ScreenSageTests: XCTestCase {
             calendarSync: { synchronizedTask in
                 synchronizedTasks.append(synchronizedTask)
                 return "event-123"
-            }
+            },
+            calendarLookup: nil,
+            syncsToCalendar: { true }
         )
 
         store.add(task)
@@ -1143,15 +1157,16 @@ final class ScreenSageTests: XCTestCase {
             ],
             events: [
                 AppleEventItem(id: "e1", title: "Standup", start: date(2026, 10, 1, 9), end: date(2026, 10, 1, 9).addingTimeInterval(15 * 60), calendar: work),
-                AppleEventItem(id: "e2", title: "Offsite", start: date(2026, 10, 5, 9), end: date(2026, 10, 5, 17), calendar: work)
+                AppleEventItem(id: "e2", title: "Offsite", start: date(2026, 10, 5, 9), end: date(2026, 10, 5, 17), calendar: work),
+                AppleEventItem(id: "e3", title: "Next week sync", start: date(2026, 10, 8, 9), end: date(2026, 10, 8, 10), calendar: work)
             ]
         )
 
         let sections = TaskAgenda.listSections(items, filter: .all, now: now, calendar: calendar)
 
-        XCTAssertEqual(sections.map(\.title), ["Overdue", "Today", "Tomorrow", "Later", "Someday", "Completed"])
+        XCTAssertEqual(sections.map(\.title), ["Overdue", "Today", "Tomorrow", "Monday", "Later", "Someday", "Completed"])
         XCTAssertEqual(sections[0].items.map(\.title), ["Overdue essay"])
-        XCTAssertEqual(sections[5].items.map(\.title), ["Done today"])
+        XCTAssertEqual(sections[6].items.map(\.title), ["Done today"])
 
         // A just-ticked item stays in its section while it is lingering.
         let doneToday = try XCTUnwrap(items.first { $0.title == "Done today" })
@@ -1160,11 +1175,13 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertFalse(lingering.contains { $0.kind == .completed })
         XCTAssertEqual(sections[1].items.map(\.title), ["Standup", "Send invoice"])
         XCTAssertEqual(sections[2].items.map(\.title), ["Dry cleaning"])
-        XCTAssertEqual(sections[3].items.map(\.title), ["Passport"])
-        XCTAssertEqual(sections[4].items.map(\.title), ["Read notes"])
+        // Events show for every day of the coming week, but not beyond it.
+        XCTAssertEqual(sections[3].items.map(\.title), ["Offsite"])
+        XCTAssertEqual(sections[4].items.map(\.title), ["Passport"])
+        XCTAssertEqual(sections[5].items.map(\.title), ["Read notes"])
 
         let eventsOnly = TaskAgenda.listSections(items, filter: .events, now: now, calendar: calendar)
-        XCTAssertEqual(eventsOnly.flatMap(\.items).map(\.title), ["Standup"])
+        XCTAssertEqual(eventsOnly.flatMap(\.items).map(\.title), ["Standup", "Offsite"])
 
         let monday = TaskAgenda.dayItems(items, on: date(2026, 10, 5, 0), calendar: calendar)
         XCTAssertEqual(monday.map(\.title), ["Offsite"])
@@ -1201,7 +1218,7 @@ final class ScreenSageTests: XCTestCase {
         let store = TaskStore(fileURL: fileURL, calendarSync: { synchronizedTask in
             XCTAssertEqual(synchronizedTask.id, task.id)
             return "event-123"
-        })
+        }, calendarLookup: nil, syncsToCalendar: { true })
 
         store.add(task)
         await waitUntil { store.tasks.first?.calendarEventIdentifier == "event-123" }
@@ -1226,7 +1243,7 @@ final class ScreenSageTests: XCTestCase {
                 )
             }
             return "event-\(task.id)"
-        })
+        }, calendarLookup: nil, syncsToCalendar: { true })
 
         store.add(failed)
         store.add(succeeds)
@@ -1245,7 +1262,8 @@ final class ScreenSageTests: XCTestCase {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let model = AppModel(
             settings: AppSettings(defaults: defaults),
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated
         )
         model.prompt = "/task"
 
@@ -1266,6 +1284,7 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             taskParser: { entry in
                 XCTAssertEqual(entry, "plan revision in two hours")
                 try await Task.sleep(for: .milliseconds(1))
@@ -1287,6 +1306,7 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             taskParser: { _ in
                 throw TaskEntryParserError.invalidDueDate("eventually")
             }
@@ -1306,6 +1326,7 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             taskParser: { _ in
                 try await Task.sleep(for: .milliseconds(30))
                 return ScreenieTask(title: "Must not be added")
@@ -1327,6 +1348,7 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             taskParser: { entry in
                 if entry == "first" {
                     try? await Task.sleep(for: .milliseconds(5))
@@ -1409,7 +1431,8 @@ final class ScreenSageTests: XCTestCase {
     func testAppModelDismissesTaskSchedule() {
         let model = AppModel(
             settings: AppSettings(),
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated
         )
         model.taskSchedule = TaskSchedule(summary: "Study tonight.", suggestions: [])
 
@@ -1433,6 +1456,7 @@ final class ScreenSageTests: XCTestCase {
         let model = AppModel(
             settings: AppSettings(),
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: .isolated,
             taskScheduleCalendarSync: { addedSchedule = $0 }
         )
         model.taskSchedule = schedule
@@ -1443,6 +1467,167 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(addedSchedule, schedule)
         XCTAssertTrue(model.didAddTaskScheduleToCalendar)
         XCTAssertEqual(model.taskError, "")
+    }
+
+    @MainActor
+    func testTaskStorePullsCalendarEditsAndUnlinksDeletedCopies() async {
+        let edited = ScreenieTask(title: "Physics", dueDate: date(2026, 8, 18, 10), notes: "old", calendarEventIdentifier: "e1")
+        let deleted = ScreenieTask(title: "Essay", dueDate: date(2026, 8, 19, 10), calendarEventIdentifier: "e2")
+        let moved = date(2026, 8, 18, 15)
+        var pushes = 0
+        let store = TaskStore(
+            fileURL: nil,
+            calendarSync: { task in
+                pushes += 1
+                return task.calendarEventIdentifier
+            },
+            calendarLookup: { task in
+                guard task.id == edited.id else { return .missing }
+                return .found(LinkedCalendarEvent(
+                    title: "✓ Physics revision",
+                    start: moved,
+                    notes: "Bring notes\n\nManaged by screenie\nTask ID: \(task.id.uuidString)"
+                ))
+            },
+            syncsToCalendar: { true }
+        )
+        store.add(edited)
+        store.add(deleted)
+
+        await store.reconcileWithCalendar()
+
+        let pulled = store.tasks.first { $0.id == edited.id }
+        XCTAssertEqual(pulled?.title, "Physics revision")
+        XCTAssertEqual(pulled?.dueDate, moved)
+        XCTAssertEqual(pulled?.notes, "Bring notes")
+        XCTAssertEqual(pulled?.isCompleted, false)
+        XCTAssertEqual(pulled?.calendarEventIdentifier, "e1")
+        // A copy deleted in Calendar unlinks the task instead of being recreated or deleting it.
+        let unlinked = store.tasks.first { $0.id == deleted.id }
+        XCTAssertNotNil(unlinked)
+        XCTAssertNil(unlinked?.calendarEventIdentifier)
+        XCTAssertEqual(pushes, 2)
+    }
+
+    @MainActor
+    func testTaskStoreDoesNotPushToCalendarOnLaunch() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString)
+            .appending(path: "tasks.json")
+        TaskStore(fileURL: fileURL, calendarSync: nil).add(
+            ScreenieTask(title: "Physics", dueDate: date(2026, 8, 18), calendarEventIdentifier: "e1")
+        )
+        var pushes = 0
+        let store = TaskStore(
+            fileURL: fileURL,
+            calendarSync: { _ in pushes += 1; return "e1" },
+            calendarLookup: { _ in .unknown },
+            syncsToCalendar: { true }
+        )
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(store.tasks.count, 1)
+        XCTAssertEqual(pushes, 0)
+    }
+
+    @MainActor
+    func testTaskStoreEditsDetailsAndUnlinksWhenCalendarSyncIsOff() async {
+        var pushed: [ScreenieTask] = []
+        var syncs = true
+        let task = ScreenieTask(title: "Physics", dueDate: date(2026, 8, 18), calendarEventIdentifier: "e1")
+        let store = TaskStore(
+            fileURL: nil,
+            calendarSync: { pushed.append($0); return "e1" },
+            calendarLookup: nil,
+            syncsToCalendar: { syncs }
+        )
+        store.add(task)
+
+        store.updateDetails(of: task.id, title: "  Physics exam ", notes: "Chapter 4")
+        await waitUntil { pushed.last?.title == "Physics exam" }
+        XCTAssertEqual(store.tasks.first?.notes, "Chapter 4")
+
+        store.updateDetails(of: task.id, title: "   ", notes: "ignored")
+        XCTAssertEqual(store.tasks.first?.title, "Physics exam")
+
+        syncs = false
+        store.updateDueDate(of: task.id, to: date(2026, 8, 20))
+        XCTAssertNil(store.tasks.first?.calendarEventIdentifier)
+    }
+
+    @MainActor
+    func testTaskEntryKeepsDestinationChosenAtSubmit() async {
+        let sources = AppleTaskSources.isolated
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: sources,
+            taskParser: { _ in
+                try await Task.sleep(for: .milliseconds(30))
+                return ScreenieTask(title: "Call mom")
+            }
+        )
+        model.addTask(entry: "call mom")
+        sources.newItemDestination = .reminders("work")
+        await waitUntil { !model.isParsingTask }
+
+        XCTAssertEqual(model.taskStore.tasks.map(\.title), ["Call mom"])
+        XCTAssertEqual(model.taskError, "")
+    }
+
+    @MainActor
+    func testUnavailableDestinationFailsInsteadOfSavingElsewhere() async {
+        let sources = AppleTaskSources.isolated
+        sources.newItemDestination = .reminders("deleted-list")
+        let model = AppModel(
+            settings: AppSettings(),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            taskSources: sources,
+            taskParser: { _ in ScreenieTask(title: "Call mom") }
+        )
+        model.taskEntry = "call mom"
+        model.addTask(entry: model.taskEntry)
+        await waitUntil { !model.isParsingTask }
+
+        XCTAssertTrue(model.taskStore.tasks.isEmpty)
+        XCTAssertTrue(model.taskError.contains("isn’t available"))
+        XCTAssertEqual(model.taskEntry, "call mom")
+
+        do {
+            try await model.add(ScreenieTask(title: "From the form"))
+            XCTFail("Expected the unavailable destination to throw")
+        } catch {}
+        XCTAssertTrue(model.taskStore.tasks.isEmpty)
+    }
+
+    func testAppleItemsOpenInTheirApps() {
+        let reminderURL = AppleReminderItem.appURL(calendarItemID: "R-1")
+        XCTAssertEqual(reminderURL?.absoluteString, "x-apple-reminderkit://REMCDReminder/R-1")
+
+        let single = AppleEventItem.appURL(calendarItemID: "E-1", occurrenceStart: nil, isAllDay: false)
+        XCTAssertEqual(single?.absoluteString, "ical://ekevent/E-1?method=show&options=more")
+
+        let pacific = TimeZone(identifier: "America/Los_Angeles")!
+        let timed = AppleEventItem.appURL(
+            calendarItemID: "E-2",
+            occurrenceStart: date(2026, 10, 2, 16),
+            isAllDay: false,
+            timeZone: pacific
+        )
+        XCTAssertEqual(timed?.absoluteString, "ical://ekevent/20261002T160000Z/E-2?method=show&options=more")
+
+        let allDay = AppleEventItem.appURL(
+            calendarItemID: "E-3",
+            occurrenceStart: date(2026, 10, 2, 7),
+            isAllDay: true,
+            timeZone: pacific
+        )
+        XCTAssertEqual(allDay?.absoluteString, "ical://ekevent/20261002T000000Z/E-3?method=show&options=more")
+
+        let list = AppleSourceCalendar(id: "l", title: "Errands", color: SourceColor(red: 0, green: 0, blue: 0))
+        let reminder = AppleReminderItem(id: "R-1", title: "Milk", list: list, appURL: reminderURL)
+        XCTAssertEqual(TaskAgendaItem(reminder).appURL, reminderURL)
+        XCTAssertEqual(TaskAgendaItem(reminder).appName, "Reminders")
+        XCTAssertNil(TaskAgendaItem(ScreenieTask(title: "Local")).appURL)
     }
 
     func testTaskScheduleRejectsBackwardTimeRange() throws {
@@ -1477,5 +1662,12 @@ final class ScreenSageTests: XCTestCase {
         return Mirror(reflecting: value).children.contains {
             containsAssistantResponseText(in: $0.value, depth: depth + 1)
         }
+    }
+}
+
+extension AppleTaskSources {
+    /// Sources with no EventKit client and throwaway preferences, so tests never read the real app's settings.
+    @MainActor static var isolated: AppleTaskSources {
+        AppleTaskSources(defaults: UserDefaults(suiteName: UUID().uuidString)!, client: nil)
     }
 }

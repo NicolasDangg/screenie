@@ -6,9 +6,7 @@ struct TaskCalendarView: View {
     @Binding var selectedDay: Date
     let errorMessage: String
     let isParsingTask: Bool
-    let toggleCompletion: (TaskAgendaItem) -> Void
-    let updateDueDate: (UUID, Date?) -> Void
-    let requestDelete: (ScreenieTask) -> Void
+    let actions: TaskItemActions
     var calendar = Calendar.autoupdatingCurrent
 
     private var week: [Date] { TaskAgenda.weekDates(containing: selectedDay, calendar: calendar) }
@@ -83,7 +81,7 @@ struct TaskCalendarView: View {
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                             .frame(width: 64, alignment: .leading)
-                        block(for: item)
+                        TaskCalendarBlock(item: item, actions: actions)
                             .padding(.leading, 12)
                             .padding(.vertical, 3)
                             .overlay(alignment: .leading) {
@@ -109,52 +107,6 @@ struct TaskCalendarView: View {
             .padding(.vertical, 6)
         }
         .accessibilityLabel("Now")
-    }
-
-    private func block(for item: TaskAgendaItem) -> some View {
-        HStack(spacing: 8) {
-            switch item.kind {
-            case .event:
-                TaskSourceMark(kind: .event, tint: item.tint)
-            case .task, .reminder:
-                TaskCheckbox(
-                    isOn: item.isCompleted,
-                    tint: item.tint,
-                    ringColor: item.kind == .reminder ? item.tint : .secondary,
-                    size: 14
-                ) { toggleCompletion(item) }
-                .padding(.vertical, -5)
-                .padding(.horizontal, -4)
-            }
-            CompletableTitle(title: item.title, isCompleted: item.isCompleted, fontSize: 13)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(detail(for: item))
-                .font(.system(size: 11.5))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .font(.system(size: 13))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(item.tint.opacity(item.isCompleted ? 0.06 : 0.14), in: .rect(cornerRadius: 8))
-        .contextMenu {
-            if let task = item.task {
-                Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(task) }
-            }
-        }
-    }
-
-    private func detail(for item: TaskAgendaItem) -> String {
-        switch item.kind {
-        case .task:
-            return "screenie"
-        case .reminder:
-            return "Reminders · \(item.sourceName)"
-        case .event:
-            guard item.hasTime, let start = item.date, let end = item.endDate else { return item.sourceName }
-            let range = "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))"
-            return "\(range) · \(item.sourceName)"
-        }
     }
 
     private func dayButton(_ day: Date) -> some View {
@@ -221,5 +173,76 @@ private struct WeekStepButton: View {
         .onHover { isHovered = $0 }
         .accessibilityLabel(title)
         .help(title)
+    }
+}
+
+/// One item in the day timeline. Tasks open their details; reminders and events open in their own app.
+private struct TaskCalendarBlock: View {
+    @Environment(\.openURL) private var openURL
+    let item: TaskAgendaItem
+    let actions: TaskItemActions
+    @State private var isShowingDetails = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            switch item.kind {
+            case .event:
+                TaskSourceMark(kind: .event, tint: item.tint)
+            case .task, .reminder:
+                TaskCheckbox(
+                    isOn: item.isCompleted,
+                    tint: item.tint,
+                    ringColor: item.kind == .reminder ? item.tint : .secondary,
+                    size: 14
+                ) { actions.toggleCompletion(item) }
+                .padding(.vertical, -5)
+                .padding(.horizontal, -4)
+            }
+            if item.task != nil {
+                Button { isShowingDetails = true } label: { label }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show details for \(item.title)")
+            } else if let url = item.appURL {
+                Button { openURL(url) } label: { label }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open \(item.title) in \(item.appName)")
+                    .help("Open in \(item.appName)")
+            } else {
+                label
+            }
+        }
+        .font(.system(size: 13))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(item.tint.opacity(item.isCompleted ? 0.06 : 0.14), in: .rect(cornerRadius: 8))
+        .modifier(TaskItemDetailsPopover(item: item, isPresented: $isShowingDetails, actions: actions))
+        .contextMenu {
+            TaskItemContextMenu(item: item, showDetails: { isShowingDetails = true }, actions: actions)
+        }
+    }
+
+    private var label: some View {
+        HStack(spacing: 8) {
+            CompletableTitle(title: item.title, isCompleted: item.isCompleted, fontSize: 13)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(detail)
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .contentShape(.rect)
+    }
+
+    private var detail: String {
+        switch item.kind {
+        case .task:
+            return "screenie"
+        case .reminder:
+            return "Reminders · \(item.sourceName)"
+        case .event:
+            guard item.hasTime, let start = item.date, let end = item.endDate else { return item.sourceName }
+            let range = "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))"
+            return "\(range) · \(item.sourceName)"
+        }
     }
 }

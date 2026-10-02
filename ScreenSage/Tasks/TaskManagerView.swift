@@ -11,6 +11,7 @@ struct TaskManagerView: View {
     @State private var isAddingTask = false
     @State private var pendingDeletion: ScreenieTask?
     @FocusState private var entryIsFocused: Bool
+    @Environment(\.openURL) private var openURL
 
     private var sources: AppleTaskSources { model.taskSources }
 
@@ -45,9 +46,7 @@ struct TaskManagerView: View {
                     didAddScheduleToCalendar: model.didAddTaskScheduleToCalendar,
                     needsConnection: sources.needsConnection,
                     connect: { Task { await sources.requestAccess() } },
-                    toggleCompletion: toggleInList,
-                    updateDueDate: model.taskStore.updateDueDate,
-                    requestDelete: requestDelete,
+                    actions: actions(toggleCompletion: toggleInList),
                     dismissSchedule: model.dismissTaskSchedule,
                     addScheduleToCalendar: model.addTaskScheduleToCalendar
                 )
@@ -57,10 +56,12 @@ struct TaskManagerView: View {
                     selectedDay: $selectedDay,
                     errorMessage: errorMessage,
                     isParsingTask: model.isParsingTask,
-                    toggleCompletion: model.toggleCompletion(of:),
-                    updateDueDate: model.taskStore.updateDueDate,
-                    requestDelete: requestDelete
+                    actions: actions(toggleCompletion: model.toggleCompletion(of:))
                 )
+            }
+
+            if let notice = model.taskSaveNotice {
+                saveNoticeView(notice)
             }
 
             Divider().opacity(0.35)
@@ -81,15 +82,10 @@ struct TaskManagerView: View {
             sources.showEvents(in: DateInterval(start: start, end: end))
         }
         .sheet(isPresented: $isAddingTask) {
-            AddTaskView { task in
-                Task {
-                    do {
-                        try await model.add(task)
-                        model.taskError = ""
-                    } catch {
-                        model.taskError = error.localizedDescription
-                    }
-                }
+            AddTaskView(destinationName: destinationTitle) { task in
+                showItems(savedTo: sources.newItemDestination)
+                try await model.add(task)
+                model.taskError = ""
             }
         }
         .alert(
@@ -205,7 +201,7 @@ struct TaskManagerView: View {
 
     private var destinationMenu: some View {
         @Bindable var sources = sources
-        let destination = sources.effectiveDestination
+        let destination = sources.newItemDestination
         let target = sources.destinationTarget
         return Menu {
             Picker("Save new items to", selection: $sources.newItemDestination) {
@@ -213,14 +209,14 @@ struct TaskManagerView: View {
                 if !sources.reminderLists.isEmpty {
                     Section("Reminders") {
                         ForEach(sources.reminderLists) { list in
-                            Text(list.title).tag(NewItemDestination.reminders(list.id))
+                            destinationLabel(list.title, for: .reminders(list.id))
                         }
                     }
                 }
                 if !sources.writableEventCalendars.isEmpty {
                     Section("Calendar event") {
                         ForEach(sources.writableEventCalendars) { calendar in
-                            Text(calendar.title).tag(NewItemDestination.calendar(calendar.id))
+                            destinationLabel(calendar.title, for: .calendar(calendar.id))
                         }
                     }
                 }
@@ -228,24 +224,85 @@ struct TaskManagerView: View {
             .pickerStyle(.inline)
         } label: {
             HStack(spacing: 5) {
-                TaskSourceMark(kind: destination.markKind, tint: target?.color.color ?? .accentColor)
-                Text(target?.title ?? "screenie")
+                if sources.destinationIsUnavailable {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                } else {
+                    TaskSourceMark(kind: destination.markKind, tint: target?.color.color ?? .accentColor)
+                }
+                Text(destinationTitle)
             }
             .font(.system(size: 11.5))
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
         .foregroundStyle(.secondary)
-        .help("Where new items are saved")
+        // Locked while parsing: the save goes where it was sent.
+        .disabled(model.isParsingTask)
+        .help(sources.destinationIsUnavailable
+              ? "The chosen list or calendar isn’t available. Choose another."
+              : "Where new items are saved")
+    }
+
+    /// Hidden lists stay choosable, but say so: their items won't show up here.
+    private func destinationLabel(_ title: String, for destination: NewItemDestination) -> some View {
+        Text(sources.shows(destination) ? title : "\(title) (hidden here)").tag(destination)
+    }
+
+    private var destinationTitle: String {
+        if sources.destinationIsUnavailable { return "Unavailable" }
+        return sources.destinationTarget?.title ?? "screenie"
     }
 
     private var entryPlaceholder: String {
-        if case .calendar = sources.effectiveDestination { return "Lunch with Sam tomorrow 12–1…" }
+        if sources.newItemDestination.isEvent { return "Lunch with Sam tomorrow 12–1…" }
         return "Call mom Friday at 6…"
     }
 
     private func submitEntry() {
+        showItems(savedTo: sources.newItemDestination)
         model.addTask(entry: model.taskEntry)
+    }
+
+    /// Clears a filter that would hide what's about to be saved.
+    private func showItems(savedTo destination: NewItemDestination) {
+        if !filter.includes(destination.markKind) { filter = .all }
+    }
+
+    private func saveNoticeView(_ notice: TaskSaveNotice) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+            Text(notice.message)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let url = notice.url {
+                Button("Open in \(notice.appName)") { openURL(url) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.tint)
+            }
+            Button("Dismiss", systemImage: "xmark", action: model.clearTaskSaveNotice)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, OverlayLayout.contentInset)
+        .padding(.vertical, 8)
+        .transition(.opacity)
+    }
+
+    private func actions(toggleCompletion: @escaping (TaskAgendaItem) -> Void) -> TaskItemActions {
+        TaskItemActions(
+            toggleCompletion: toggleCompletion,
+            updateDueDate: model.taskStore.updateDueDate,
+            updateDetails: model.taskStore.updateDetails,
+            updateReminder: model.updateReminder,
+            delete: requestDelete
+        )
     }
 
     private func showScheduleHint() {
@@ -269,7 +326,7 @@ struct TaskManagerView: View {
     }
 }
 
-private extension NewItemDestination {
+extension NewItemDestination {
     var markKind: TaskAgendaKind {
         switch self {
         case .screenie: .task

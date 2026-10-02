@@ -27,6 +27,8 @@ final class AppModel {
     var isParsingTask = false
     /// Text in the task panel's inline field; kept after a failed parse so it can be corrected.
     var taskEntry = ""
+    /// Confirms where the last Reminders/Calendar save went, since it may not be visible in screenie.
+    var taskSaveNotice: TaskSaveNotice?
     var includeScreenshotForNextMessage = true
     var attachedScreenshot: Data?
     var expandedChatSize = CGSize(width: OverlayLayout.collapsedWidth, height: OverlayLayout.expandedHeight)
@@ -47,6 +49,7 @@ final class AppModel {
     private var scheduleCalendarTask: Task<Void, Never>?
     private var taskParsingTask: Task<Void, Never>?
     private var taskParsingID: UUID?
+    private var taskNoticeTask: Task<Void, Never>?
     private var conversationExpiryTask: Task<Void, Never>?
     private var conversationExpiresAt: Date?
 
@@ -434,27 +437,31 @@ final class AppModel {
 
     /// Parses a natural-language entry on-device and saves it to the chosen destination:
     /// a screenie task, a reminder, or an event in an Apple calendar.
+    /// The destination is fixed when the entry is submitted, so changing it mid-parse can't redirect the save.
     func addTask(entry rawEntry: String) {
         let entry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !entry.isEmpty else { return }
         taskError = ""
+        clearTaskSaveNotice()
         taskParsingTask?.cancel()
         let parsingID = UUID()
+        let chosen = taskSources.newItemDestination
         taskParsingID = parsingID
         isParsingTask = true
         taskParsingTask = Task {
             do {
-                await refreshDestinationIfNeeded()
-                if case let .calendar(calendarID) = taskSources.effectiveDestination {
+                let destination = try await resolveDestination(chosen)
+                if case let .calendar(calendarID) = destination {
                     let event = try await eventParser(entry)
                     try Task.checkCancellation()
                     guard taskParsingID == parsingID else { return }
-                    try await taskSources.addEvent(event, to: calendarID)
+                    let url = try await taskSources.addEvent(event, to: calendarID)
+                    announceSave(title: event.title, date: event.start, hasTime: !event.isAllDay, to: destination, url: url)
                 } else {
                     let task = try await taskParser(entry)
                     try Task.checkCancellation()
                     guard taskParsingID == parsingID else { return }
-                    try await add(task)
+                    try await save(task, to: destination)
                 }
                 if taskEntry.trimmingCharacters(in: .whitespacesAndNewlines) == entry { taskEntry = "" }
             } catch is CancellationError {
@@ -469,26 +476,59 @@ final class AppModel {
         }
     }
 
-    /// Saves a parsed task to the chosen destination. A calendar destination needs a due date and
-    /// becomes a one-hour event.
+    /// Saves a task built in the details form to the current destination.
     func add(_ task: ScreenieTask) async throws {
-        await refreshDestinationIfNeeded()
-        switch taskSources.effectiveDestination {
+        clearTaskSaveNotice()
+        let chosen = taskSources.newItemDestination
+        try await save(task, to: resolveDestination(chosen))
+    }
+
+    /// A calendar destination needs a due date and becomes a one-hour event.
+    private func save(_ task: ScreenieTask, to destination: NewItemDestination) async throws {
+        switch destination {
         case .screenie:
-            taskStore.add(task)
+            guard taskStore.add(task) else { throw TaskStoreError.saveFailed(taskStore.lastError) }
         case let .reminders(listID):
-            try await taskSources.addReminder(task, to: listID)
+            let url = try await taskSources.addReminder(task, to: listID)
+            announceSave(title: task.title, date: task.dueDate, hasTime: true, to: destination, url: url)
         case let .calendar(calendarID):
             guard let start = task.dueDate else { throw TaskEntryParserError.missingEventTime }
             let timing = EventTiming(start: start, end: start.addingTimeInterval(TaskDateResolver.defaultEventDuration), isAllDay: false)
-            try await taskSources.addEvent(ParsedEvent(title: task.title, timing: timing, notes: task.notes), to: calendarID)
+            let url = try await taskSources.addEvent(ParsedEvent(title: task.title, timing: timing, notes: task.notes), to: calendarID)
+            announceSave(title: task.title, date: start, hasTime: true, to: destination, url: url)
         }
     }
 
-    /// Lists load lazily, so make sure the chosen destination can be found before falling back to screenie.
-    private func refreshDestinationIfNeeded() async {
-        guard taskSources.newItemDestination != .screenie, taskSources.destinationTarget == nil else { return }
-        await taskSources.refresh()
+    /// Lists load lazily, so make sure the chosen destination can be found before deciding it's gone.
+    private func resolveDestination(_ chosen: NewItemDestination) async throws -> NewItemDestination {
+        if chosen != .screenie, taskSources.reachableTarget(for: chosen) == nil {
+            await taskSources.refresh()
+        }
+        return try taskSources.resolvedDestination(chosen)
+    }
+
+    private func announceSave(title: String, date: Date?, hasTime: Bool, to destination: NewItemDestination, url: URL?) {
+        let place = taskSources.target(for: destination)?.title ?? (destination.isEvent ? "Calendar" : "Reminders")
+        var parts = ["Added “\(title)” to \(place)"]
+        if let date {
+            parts.append(hasTime
+                ? date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+                : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+        }
+        if !taskSources.shows(destination) { parts.append("hidden in screenie") }
+        taskSaveNotice = TaskSaveNotice(message: parts.joined(separator: " · "), url: url, appName: destination.isEvent ? "Calendar" : "Reminders")
+        taskNoticeTask?.cancel()
+        taskNoticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            self?.taskSaveNotice = nil
+        }
+    }
+
+    func clearTaskSaveNotice() {
+        taskNoticeTask?.cancel()
+        taskNoticeTask = nil
+        taskSaveNotice = nil
     }
 
     func toggleCompletion(of item: TaskAgendaItem) {
@@ -500,6 +540,10 @@ final class AppModel {
         case .event:
             break
         }
+    }
+
+    func updateReminder(_ reminder: AppleReminderItem, title: String, notes: String, dueDate: Date?, hasTime: Bool) {
+        taskSources.updateReminder(reminder, title: title, notes: notes, dueDate: dueDate, hasTime: hasTime)
     }
 
     private func cancelTaskParsing() {
@@ -536,5 +580,27 @@ final class AppModel {
         guard conversation.id == conversationID else { return }
         conversation.title = Conversation.cleanedTitle(generated, fallbackPrompt: firstPrompt)
         conversation.updatedAt = .now
+    }
+}
+
+struct TaskSaveNotice: Equatable {
+    let message: String
+    let url: URL?
+    let appName: String
+}
+
+enum TaskStoreError: LocalizedError {
+    case saveFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .saveFailed(message): message
+        }
+    }
+}
+
+extension NewItemDestination {
+    var isEvent: Bool {
+        if case .calendar = self { true } else { false }
     }
 }

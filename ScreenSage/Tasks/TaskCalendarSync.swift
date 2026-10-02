@@ -56,6 +56,18 @@ actor TaskCalendarSync {
         try eventStore.remove(event, span: .thisEvent, commit: true)
     }
 
+    /// Reads the task's linked event without prompting for access.
+    func linkedEvent(for task: ScreenieTask) -> LinkedCalendarEventLookup {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess,
+              let identifier = task.calendarEventIdentifier else { return .unknown }
+        let marker = TaskCalendarEvent(task: task).taskMarker
+        // Identifiers can change when an account resyncs, so fall back to the marker before calling it deleted.
+        guard let event = eventStore.event(withIdentifier: identifier)
+                ?? task.dueDate.flatMap({ matchingEvent(marker: marker, near: $0) }) else { return .missing }
+        guard event.notes?.contains(marker) == true, let start = event.startDate else { return .unknown }
+        return .found(LinkedCalendarEvent(title: event.title ?? "", start: start, notes: event.notes))
+    }
+
     func add(_ schedule: TaskSchedule) async throws {
         guard !schedule.suggestions.isEmpty else { return }
         guard try await hasAccess() else {

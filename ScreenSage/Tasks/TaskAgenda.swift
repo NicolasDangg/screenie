@@ -76,6 +76,23 @@ struct TaskAgendaItem: Identifiable, Equatable {
     var task: ScreenieTask? {
         if case let .task(task) = source { task } else { nil }
     }
+
+    /// Where clicking a Reminders or Calendar row takes the user; screenie tasks open in place instead.
+    var appURL: URL? {
+        switch source {
+        case .task: nil
+        case let .reminder(reminder): reminder.appURL
+        case let .event(event): event.appURL
+        }
+    }
+
+    var appName: String {
+        switch source {
+        case .task: "screenie"
+        case .reminder: "Reminders"
+        case .event: "Calendar"
+        }
+    }
 }
 
 enum TaskAgendaFilter: String, CaseIterable, Identifiable {
@@ -130,7 +147,7 @@ enum TaskAgenda {
 
     /// Groups items for the list view: overdue, each of the next seven days, later, and undated.
     /// Items completed today collect in a final Completed section, except ids in `lingering`, which stay put
-    /// briefly so the checkmark animation can play. Events only appear for today and tomorrow.
+    /// briefly so the checkmark animation can play. Events appear for the seven days shown; later events live in the week view.
     static func listSections(
         _ items: [TaskAgendaItem],
         filter: TaskAgendaFilter,
@@ -140,7 +157,6 @@ enum TaskAgenda {
     ) -> [TaskAgendaSection] {
         let today = calendar.startOfDay(for: now)
         guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: today),
-              let dayAfterTomorrow = calendar.date(byAdding: .day, value: 2, to: today),
               let weekEnd = calendar.date(byAdding: .day, value: 7, to: today) else { return [] }
 
         var overdue: [TaskAgendaItem] = []
@@ -163,7 +179,7 @@ enum TaskAgenda {
             }
             if item.kind == .event {
                 let end = item.endDate ?? date
-                guard end > today, date < dayAfterTomorrow else { continue }
+                guard end > today, date < weekEnd else { continue }
                 days[max(calendar.startOfDay(for: date), today), default: []].append(item)
                 continue
             }

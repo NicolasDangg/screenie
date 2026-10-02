@@ -77,11 +77,7 @@ final class AppleTaskSources {
         syncsTasksToCalendar = Self.syncsTasksToCalendar(in: defaults)
         reminderAccess = client == nil ? .denied : .current(for: .reminder)
         eventAccess = client == nil ? .denied : .current(for: .event)
-        let today = calendar.startOfDay(for: now)
-        eventRange = DateInterval(
-            start: calendar.date(byAdding: .day, value: -7, to: today) ?? today,
-            end: calendar.date(byAdding: .day, value: 28, to: today) ?? today
-        )
+        eventRange = Self.defaultEventRange(around: now, calendar: calendar)
         guard client != nil else { return }
         changeObserver = NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged,
@@ -107,7 +103,11 @@ final class AppleTaskSources {
 
     /// The list or calendar the destination points at, or `nil` when it's screenie or no longer reachable.
     var destinationTarget: AppleSourceCalendar? {
-        switch newItemDestination {
+        reachableTarget(for: newItemDestination)
+    }
+
+    func reachableTarget(for destination: NewItemDestination) -> AppleSourceCalendar? {
+        switch destination {
         case .screenie:
             nil
         case let .reminders(id):
@@ -117,9 +117,39 @@ final class AppleTaskSources {
         }
     }
 
-    /// The destination to actually use: falls back to screenie when the chosen list or calendar is gone.
-    var effectiveDestination: NewItemDestination {
-        destinationTarget == nil ? .screenie : newItemDestination
+    /// True once sources have loaded and the chosen list or calendar can't be found (deleted, or access revoked).
+    var destinationIsUnavailable: Bool {
+        newItemDestination != .screenie && destinationTarget == nil && (lastRefreshed != nil || client == nil)
+    }
+
+    /// Checks the destination a save will use. Never substitutes another place: an unreachable choice is an error.
+    func resolvedDestination(_ destination: NewItemDestination? = nil) throws -> NewItemDestination {
+        let destination = destination ?? newItemDestination
+        guard destination == .screenie || reachableTarget(for: destination) != nil else {
+            throw NSError(
+                domain: "screenie.destination",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The “Save to” list or calendar isn’t available anymore. Choose another destination."]
+            )
+        }
+        return destination
+    }
+
+    /// Whether items saved to `destination` show up in screenie's own views with the current settings.
+    func shows(_ destination: NewItemDestination) -> Bool {
+        switch destination {
+        case .screenie: true
+        case let .reminders(id): showsReminders && !hiddenReminderListIDs.contains(id)
+        case let .calendar(id): showsEvents && !hiddenCalendarIDs.contains(id)
+        }
+    }
+
+    func target(for destination: NewItemDestination) -> AppleSourceCalendar? {
+        switch destination {
+        case .screenie: nil
+        case let .reminders(id): reminderLists.first { $0.id == id }
+        case let .calendar(id): eventCalendars.first { $0.id == id }
+        }
     }
 
     func isVisible(_ list: AppleSourceCalendar) -> Bool {
@@ -161,6 +191,15 @@ final class AppleTaskSources {
         await refresh()
     }
 
+    /// A week back to four weeks ahead, which covers the list view and a few weeks of paging.
+    nonisolated static func defaultEventRange(around now: Date, calendar: Calendar) -> DateInterval {
+        let today = calendar.startOfDay(for: now)
+        return DateInterval(
+            start: calendar.date(byAdding: .day, value: -7, to: today) ?? today,
+            end: calendar.date(byAdding: .day, value: 28, to: today) ?? today
+        )
+    }
+
     func scheduleRefresh() {
         refreshTask?.cancel()
         refreshTask = Task { await refresh() }
@@ -168,6 +207,11 @@ final class AppleTaskSources {
 
     func refresh() async {
         guard let client else { return }
+        // screenie runs for days from login, so keep the window moving with today.
+        let current = Self.defaultEventRange(around: .now, calendar: calendar)
+        if current.end > eventRange.end {
+            eventRange = DateInterval(start: eventRange.start, end: current.end)
+        }
         reminderAccess = .current(for: .reminder)
         eventAccess = .current(for: .event)
 
@@ -239,17 +283,47 @@ final class AppleTaskSources {
         }
     }
 
-    func addEvent(_ event: ParsedEvent, to calendarID: String) async throws {
-        guard let client else { return }
-        try await client.addEvent(event, calendarID: calendarID)
+    /// Returns a link that opens the new event in Calendar.
+    func addEvent(_ event: ParsedEvent, to calendarID: String) async throws -> URL? {
+        guard let client else { throw Self.unavailableError }
+        let url = try await client.addEvent(event, calendarID: calendarID)
         await refresh()
+        return url
     }
 
-    func addReminder(_ task: ScreenieTask, to listID: String) async throws {
-        guard let client else { return }
-        try await client.addReminder(title: task.title, dueDate: task.dueDate, notes: task.notes, listID: listID)
+    /// Returns a link that opens the new reminder in Reminders.
+    func addReminder(_ task: ScreenieTask, to listID: String) async throws -> URL? {
+        guard let client else { throw Self.unavailableError }
+        let url = try await client.addReminder(title: task.title, dueDate: task.dueDate, notes: task.notes, listID: listID)
         await refresh()
+        return url
     }
+
+    func updateReminder(_ reminder: AppleReminderItem, title: String, notes: String, dueDate: Date?, hasTime: Bool) {
+        guard let client else { return }
+        // Show the edit right away; the refresh afterwards brings back whatever Reminders actually saved.
+        if let index = reminders.firstIndex(where: { $0.id == reminder.id }) {
+            reminders[index].title = title
+            reminders[index].notes = notes
+            reminders[index].dueDate = dueDate
+            reminders[index].hasTime = dueDate != nil && hasTime
+        }
+        Task {
+            do {
+                try await client.updateReminder(reminder.id, title: title, notes: notes, dueDate: dueDate, hasTime: hasTime)
+                errorMessage = ""
+            } catch {
+                errorMessage = "Could not update Reminders: \(error.localizedDescription)"
+            }
+            await refresh()
+        }
+    }
+
+    private static let unavailableError = NSError(
+        domain: "screenie.reminders",
+        code: 2,
+        userInfo: [NSLocalizedDescriptionKey: "Reminders and Calendar aren’t available."]
+    )
 }
 
 enum NewItemDestination: Hashable, Sendable {

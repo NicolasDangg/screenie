@@ -26,13 +26,69 @@ struct TaskSourceMark: View {
     }
 }
 
+/// What the task views can do to an item, shared by the list and week views.
+struct TaskItemActions {
+    var toggleCompletion: (TaskAgendaItem) -> Void
+    var updateDueDate: (UUID, Date?) -> Void
+    var updateDetails: (UUID, _ title: String, _ notes: String) -> Void
+    var updateReminder: (AppleReminderItem, _ title: String, _ notes: String, _ dueDate: Date?, _ hasTime: Bool) -> Void
+    var delete: (ScreenieTask) -> Void
+}
+
+/// Details for screenie tasks and reminders. Clicking a reminder or event opens it in its own app,
+/// so the reminder editor is reached from the context menu.
+struct TaskItemDetailsPopover: ViewModifier {
+    let item: TaskAgendaItem
+    @Binding var isPresented: Bool
+    let actions: TaskItemActions
+
+    func body(content: Content) -> some View {
+        content.popover(isPresented: $isPresented) {
+            switch item.source {
+            case let .task(task):
+                TaskDetailsPopoverView(
+                    task: task,
+                    updateDueDate: { actions.updateDueDate(task.id, $0) },
+                    updateDetails: { actions.updateDetails(task.id, $0, $1) }
+                )
+            case let .reminder(reminder):
+                ReminderDetailsPopoverView(reminder: reminder) {
+                    actions.updateReminder(reminder, $0, $1, $2, $3)
+                }
+            case .event:
+                EmptyView()
+            }
+        }
+    }
+}
+
+/// The context menu shared by list rows and week blocks.
+struct TaskItemContextMenu: View {
+    @Environment(\.openURL) private var openURL
+    let item: TaskAgendaItem
+    let showDetails: () -> Void
+    let actions: TaskItemActions
+
+    var body: some View {
+        if item.kind != .event {
+            Button(item.kind == .task ? "Details…" : "Edit…", systemImage: "pencil", action: showDetails)
+        }
+        if let url = item.appURL {
+            Button("Open in \(item.appName)", systemImage: "arrow.up.forward.app") { openURL(url) }
+        }
+        if let task = item.task {
+            Divider()
+            Button("Delete", systemImage: "trash", role: .destructive) { actions.delete(task) }
+        }
+    }
+}
+
 struct TaskRowView: View {
+    @Environment(\.openURL) private var openURL
     let item: TaskAgendaItem
     let timeLabel: String
     var isHighlighted = false
-    let toggleCompletion: () -> Void
-    let updateDueDate: (UUID, Date?) -> Void
-    let delete: (ScreenieTask) -> Void
+    let actions: TaskItemActions
 
     @State private var isHovered = false
     @State private var isShowingDetails = false
@@ -72,10 +128,9 @@ struct TaskRowView: View {
         }
         .contentShape(.rect)
         .onHover { isHovered = $0 }
+        .modifier(TaskItemDetailsPopover(item: item, isPresented: $isShowingDetails, actions: actions))
         .contextMenu {
-            if let task = item.task {
-                Button("Delete", systemImage: "trash", role: .destructive) { delete(task) }
-            }
+            TaskItemContextMenu(item: item, showDetails: { isShowingDetails = true }, actions: actions)
         }
     }
 
@@ -90,7 +145,7 @@ struct TaskRowView: View {
                 isOn: item.isCompleted,
                 tint: item.tint,
                 ringColor: item.kind == .reminder ? item.tint : .secondary,
-                action: toggleCompletion
+                action: { actions.toggleCompletion(item) }
             )
         }
     }
@@ -118,9 +173,15 @@ struct TaskRowView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Show details for \(task.title)")
-            .popover(isPresented: $isShowingDetails) {
-                TaskDetailsPopoverView(task: task) { updateDueDate(task.id, $0) }
+        } else if let url = item.appURL {
+            Button { openURL(url) } label: {
+                title
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(item.title) in \(item.appName)")
+            .help("Open in \(item.appName)")
         } else {
             title
         }

@@ -1,3 +1,4 @@
+import EventKit
 import Foundation
 import Observation
 
@@ -10,8 +11,12 @@ final class TaskStore {
     private let fileURL: URL?
     private let calendarDelete: (@MainActor (ScreenieTask) async throws -> Void)?
     private let calendarSync: (@MainActor (ScreenieTask) async throws -> String?)?
+    private let calendarLookup: (@MainActor (ScreenieTask) async -> LinkedCalendarEventLookup)?
     private let syncsToCalendar: @MainActor () -> Bool
     private var syncTasks: [UUID: Task<Void, Never>] = [:]
+    private var syncTokens: [UUID: UUID] = [:]
+    private var reconcileTask: Task<Void, Never>?
+    private var changeObserver: NSObjectProtocol?
 
     init(
         fileURL: URL? = TaskStore.defaultFileURL,
@@ -21,14 +26,28 @@ final class TaskStore {
         calendarSync: (@MainActor (ScreenieTask) async throws -> String?)? = { task in
             return try await TaskCalendarSync.shared.upsert(task)
         },
+        calendarLookup: (@MainActor (ScreenieTask) async -> LinkedCalendarEventLookup)? = { task in
+            await TaskCalendarSync.shared.linkedEvent(for: task)
+        },
         syncsToCalendar: @escaping @MainActor () -> Bool = { AppleTaskSources.syncsTasksToCalendar() }
     ) {
         self.fileURL = fileURL
         self.calendarDelete = calendarDelete
         self.calendarSync = calendarSync
+        self.calendarLookup = calendarSync == nil ? nil : calendarLookup
         self.syncsToCalendar = syncsToCalendar
         load()
-        tasks.filter { $0.dueDate != nil }.forEach { synchronize($0.id) }
+        // Launch only reads Calendar: pushing every task here would overwrite edits made in Calendar
+        // and recreate copies the user deleted. Pushes happen when the task itself changes.
+        guard self.calendarLookup != nil else { return }
+        scheduleCalendarReconcile()
+        changeObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleCalendarReconcile() }
+        }
     }
 
     var sortedTasks: [ScreenieTask] {
@@ -68,13 +87,70 @@ final class TaskStore {
         calendarErrors[id] ?? ""
     }
 
-    func add(_ task: ScreenieTask) {
+    @discardableResult
+    func add(_ task: ScreenieTask) -> Bool {
         tasks.append(task)
         guard save() else {
             tasks.removeAll { $0.id == task.id }
-            return
+            return false
         }
         synchronize(task.id)
+        return true
+    }
+
+    func updateDetails(of id: UUID, title: String, notes: String) {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        let previousTask = tasks[index]
+        guard previousTask.title != title || previousTask.notes != notes else { return }
+        tasks[index].title = title
+        tasks[index].notes = notes
+        guard save() else {
+            tasks[index] = previousTask
+            return
+        }
+        synchronize(id)
+    }
+
+    /// Pulls edits made to linked Calendar copies into their tasks, and unlinks copies deleted in Calendar
+    /// (the task stays). Tasks changed locally while this runs are left alone; their own push wins.
+    func reconcileWithCalendar() async {
+        guard let calendarLookup, syncsToCalendar() else { return }
+        for pending in Array(syncTasks.values) { await pending.value }
+        let linked = tasks.filter { $0.calendarEventIdentifier != nil && $0.dueDate != nil }
+        var changed = false
+        for snapshot in linked {
+            let lookup = await calendarLookup(snapshot)
+            guard !Task.isCancelled else { return }
+            guard let index = tasks.firstIndex(where: { $0.id == snapshot.id }),
+                  tasks[index] == snapshot,
+                  syncTasks[snapshot.id] == nil else { continue }
+            switch lookup {
+            case let .found(event):
+                let updated = TaskCalendarEvent.applying(event, to: snapshot)
+                if updated != snapshot {
+                    tasks[index] = updated
+                    changed = true
+                }
+            case .missing:
+                tasks[index].calendarEventIdentifier = nil
+                changed = true
+            case .unknown:
+                break
+            }
+        }
+        if changed { save() }
+    }
+
+    private func scheduleCalendarReconcile() {
+        reconcileTask?.cancel()
+        reconcileTask = Task { [weak self] in
+            // EventKit posts several change notifications per edit; settle before reading.
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await self?.reconcileWithCalendar()
+        }
     }
 
     func toggleCompletion(of id: UUID) {
@@ -194,14 +270,30 @@ final class TaskStore {
 
     private func synchronize(_ id: UUID) {
         guard let calendarSync,
-              syncsToCalendar(),
-              let task = tasks.first(where: { $0.id == id }),
-              task.dueDate != nil else { return }
+              let index = tasks.firstIndex(where: { $0.id == id }),
+              tasks[index].dueDate != nil else { return }
+        guard syncsToCalendar() else {
+            // The Calendar copy stops tracking this task, so drop the link rather than later
+            // pulling the stale copy back over the newer local edit.
+            if tasks[index].calendarEventIdentifier != nil {
+                tasks[index].calendarEventIdentifier = nil
+                save()
+            }
+            return
+        }
 
         let previousSync = syncTasks[id]
+        let token = UUID()
+        syncTokens[id] = token
         syncTasks[id] = Task { [weak self] in
             await previousSync?.value
             guard let self else { return }
+            defer {
+                if syncTokens[id] == token {
+                    syncTasks[id] = nil
+                    syncTokens[id] = nil
+                }
+            }
             do {
                 guard let task = tasks.first(where: { $0.id == id }) else { return }
                 let eventIdentifier = try await calendarSync(task)
