@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import ServiceManagement
 
 @MainActor
@@ -19,7 +20,11 @@ final class AppRuntime {
     let history: ChatHistoryStore
     private let taskStore: TaskStore
     lazy var model = AppModel(settings: settings, history: history, taskStore: taskStore)
-    private lazy var panelController = OverlayPanelController(model: model)
+    private lazy var panelController = OverlayPanelController(
+        model: model,
+        showHistory: { [weak self] in self?.showHistory() }
+    )
+    private var historyWindow: NSWindow?
     private var hotKey: GlobalHotKey?
     private var taskHotKey: GlobalHotKey?
 
@@ -55,6 +60,38 @@ final class AppRuntime {
 
     func showOverlay() {
         panelController.startNewChat()
+    }
+
+    func showTasks() {
+        panelController.showTasks()
+    }
+
+    func continueConversation(_ conversation: Conversation) {
+        panelController.continueConversation(conversation)
+    }
+
+    /// Opens (or brings forward) the History window. It is managed here rather than as a SwiftUI
+    /// `Window` scene so the overlay panel, which isn't a SwiftUI scene, can open it too.
+    func showHistory() {
+        if historyWindow == nil {
+            let controller = NSHostingController(rootView: HistoryRootView(
+                conversationStore: history,
+                taskStore: taskStore,
+                continueConversation: { [weak self] in self?.continueConversation($0) }
+            ))
+            controller.sceneBridgingOptions = [.toolbars, .title]
+            let window = NSWindow(contentViewController: controller)
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            window.title = "History"
+            window.isReleasedWhenClosed = false
+            window.setContentSize(NSSize(width: 900, height: 600))
+            window.contentMinSize = NSSize(width: 640, height: 420)
+            window.setFrameAutosaveName("HistoryWindow")
+            if window.frame.origin == .zero { window.center() }
+            historyWindow = window
+        }
+        NSApp.activate()
+        historyWindow?.makeKeyAndOrderFront(nil)
     }
 
     func toggleOverlay() {

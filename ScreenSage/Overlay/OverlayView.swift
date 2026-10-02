@@ -9,6 +9,7 @@ struct OverlayView: View {
     let setExpanded: (Bool) -> Void
     let resize: (OverlayResizeHandle, CGPoint) -> Void
     let endResize: () -> Void
+    var showHistory: () -> Void = {}
 
     private var isExpanded: Bool { model.isExpanded }
     private var width: Double {
@@ -102,6 +103,13 @@ struct OverlayView: View {
                         .lineLimit(1)
                         .foregroundStyle(model.hasCompletedFirstResponse ? .primary : .secondary)
                     Spacer()
+                    Button("History", systemImage: "clock", action: showHistory)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(.rect)
+                        .help("History")
                     Button("New Chat", systemImage: "plus", action: model.startNewConversation)
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
@@ -245,7 +253,7 @@ struct OverlayView: View {
     }
 }
 
-private struct OpenRouterModelPicker: View {
+struct OpenRouterModelPicker: View {
     @Bindable var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""

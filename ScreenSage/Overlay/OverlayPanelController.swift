@@ -19,7 +19,7 @@ final class OverlayPanelController {
     private var resizeStart: (frame: NSRect, mouse: NSPoint)?
     private(set) var isPresented = false
 
-    init(model: AppModel, defaults: UserDefaults = .standard) {
+    init(model: AppModel, defaults: UserDefaults = .standard, showHistory: @escaping () -> Void = {}) {
         self.model = model
         self.defaults = defaults
         let panel = KeyablePanel(
@@ -48,7 +48,8 @@ final class OverlayPanelController {
             close: { [weak self] in self?.hide() },
             setExpanded: { [weak self] in self?.setExpanded($0) },
             resize: { [weak self] handle, location in self?.resize(handle, at: location) },
-            endResize: { [weak self] in self?.resizeStart = nil }
+            endResize: { [weak self] in self?.resizeStart = nil },
+            showHistory: showHistory
         ))
         // Keep everything outside the rounded glass fully transparent.
         hostingView.wantsLayer = true
@@ -99,6 +100,17 @@ final class OverlayPanelController {
         model.presentTasks()
         setExpanded(true)
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// Shows a saved conversation in the overlay so it can be continued.
+    func continueConversation(_ conversation: Conversation) {
+        model.resume(conversation)
+        if isPresented {
+            setExpanded(true)
+            panel.makeKeyAndOrderFront(nil)
+        } else {
+            show()
+        }
     }
 
     func startNewChat() {

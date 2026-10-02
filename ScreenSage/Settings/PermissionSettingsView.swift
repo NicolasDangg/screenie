@@ -6,29 +6,32 @@ struct PermissionSettingsView: View {
     @State private var grantedPermissions = Set<AppPermission>()
 
     var body: some View {
-        Section("Permissions") {
+        Section {
             ForEach(AppPermission.allCases) { permission in
-                HStack {
-                    VStack(alignment: .leading) {
+                let isGranted = grantedPermissions.contains(permission)
+                HStack(spacing: 10) {
+                    statusDot(isGranted: isGranted, isRequired: permission.requirement == "Required")
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(permission.title)
                         Text(permission.requirement)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Label(
-                        grantedPermissions.contains(permission) ? "Enabled" : "Disabled",
-                        systemImage: grantedPermissions.contains(permission) ? "checkmark.circle.fill" : "xmark.circle"
-                    )
-                    .foregroundStyle(grantedPermissions.contains(permission) ? .green : .secondary)
-                    if !grantedPermissions.contains(permission) {
-                        Button("Request Access") { request(permission) }
+                    if isGranted {
+                        Text("Allowed")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("Allow…") { request(permission) }
                     }
-                    Button("Open Settings") { openSettings(for: permission) }
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityValue(isGranted ? "Allowed" : "Not allowed")
             }
-            Text("After enabling screen capture, restart screenie. If it isn't listed, use Add in System Settings and choose /Applications/screenie.app.")
-                .foregroundStyle(.secondary)
+        } header: {
+            Text("Permissions")
+        } footer: {
+            Text("After allowing Screen Recording, restart screenie. If it isn’t listed, use Add in System Settings and choose /Applications/screenie.app.")
         }
         .task(refresh)
         .onChange(of: scenePhase) { _, phase in
@@ -36,17 +39,26 @@ struct PermissionSettingsView: View {
         }
     }
 
-    private func refresh() {
-        grantedPermissions = Set(AppPermission.allCases.filter(\.isGranted))
+    /// Filled green when allowed; an orange ring when a required permission is missing, grey when optional.
+    private func statusDot(isGranted: Bool, isRequired: Bool) -> some View {
+        Group {
+            if isGranted {
+                Circle().fill(.green)
+            } else {
+                Circle().strokeBorder(isRequired ? .orange : .secondary, lineWidth: 1.5)
+            }
+        }
+        .frame(width: 8, height: 8)
+        .accessibilityHidden(true)
     }
 
-    private func openSettings(for permission: AppPermission) {
-        NSWorkspace.shared.open(permission.settingsURL)
+    private func refresh() {
+        grantedPermissions = Set(AppPermission.allCases.filter(\.isGranted))
     }
 
     private func request(_ permission: AppPermission) {
         let granted = permission.request()
         refresh()
-        if !granted { openSettings(for: permission) }
+        if !granted { NSWorkspace.shared.open(permission.settingsURL) }
     }
 }

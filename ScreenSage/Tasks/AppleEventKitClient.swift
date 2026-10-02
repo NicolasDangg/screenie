@@ -26,17 +26,21 @@ struct AppleSourceCalendar: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let color: SourceColor
+    /// False for subscribed and read-only calendars, which can't take new events.
+    var allowsModifications = true
 
-    init(id: String, title: String, color: SourceColor) {
+    init(id: String, title: String, color: SourceColor, allowsModifications: Bool = true) {
         self.id = id
         self.title = title
         self.color = color
+        self.allowsModifications = allowsModifications
     }
 
     init(_ calendar: EKCalendar) {
         id = calendar.calendarIdentifier
         title = calendar.title
         color = SourceColor(calendar.color)
+        allowsModifications = calendar.allowsContentModifications
     }
 }
 
@@ -190,6 +194,20 @@ actor AppleEventKitClient {
             )
         }
         try store.save(reminder, commit: true)
+    }
+
+    func addEvent(_ event: ParsedEvent, calendarID: String) throws {
+        guard let calendar = store.calendar(withIdentifier: calendarID), calendar.allowsContentModifications else {
+            throw Self.error("That calendar can't take new events.")
+        }
+        let newEvent = EKEvent(eventStore: store)
+        newEvent.calendar = calendar
+        newEvent.title = event.title
+        newEvent.startDate = event.start
+        newEvent.endDate = event.end
+        newEvent.isAllDay = event.isAllDay
+        newEvent.notes = event.notes.isEmpty ? nil : event.notes
+        try store.save(newEvent, span: .thisEvent, commit: true)
     }
 
     private func fetchReminders(matching predicate: NSPredicate) async -> [AppleReminderItem] {

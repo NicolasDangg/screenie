@@ -8,6 +8,11 @@ enum TaskDateResolver {
 
     /// Returns `nil` when any part of the phrase isn't understood, so vague text like "eventually" is rejected.
     static func resolve(_ phrase: String, now: Date, calendar: Calendar) -> Date? {
+        resolveDetailed(phrase, now: now, calendar: calendar)?.date
+    }
+
+    /// Like `resolve`, but also says whether the phrase named a time (rather than just a day).
+    static func resolveDetailed(_ phrase: String, now: Date, calendar: Calendar) -> (date: Date, hasTime: Bool)? {
         var text = " " + phrase.lowercased()
             .replacingOccurrences(of: ",", with: " ")
             .replacingOccurrences(of: ".", with: "")
@@ -103,19 +108,28 @@ enum TaskDateResolver {
         if day == nil, resolved <= now {
             resolved = calendar.date(byAdding: .day, value: 1, to: resolved) ?? resolved
         }
-        return resolved
+        return (resolved, time != nil || periodHour != nil)
     }
 
     /// Finds a scheduling phrase at the start or end of `entry` and returns the rest as the title.
     static func split(_ entry: String, now: Date, calendar: Calendar) -> (title: String, dueDate: Date?) {
+        split(entry) { resolve($0, now: now, calendar: calendar) }
+    }
+
+    /// The event version of `split`: finds a phrase such as "tomorrow 12-1" at either end of `entry`.
+    static func splitEvent(_ entry: String, now: Date, calendar: Calendar) -> (title: String, timing: EventTiming?) {
+        split(entry) { resolveEvent($0, now: now, calendar: calendar) }
+    }
+
+    private static func split<Value>(_ entry: String, resolve: (String) -> Value?) -> (String, Value?) {
         let words = entry.split(whereSeparator: \.isWhitespace).map(String.init)
         guard words.count > 1 else { return (entry, nil) }
-        for count in stride(from: min(6, words.count - 1), through: 1, by: -1) {
-            if let date = resolve(words.suffix(count).joined(separator: " "), now: now, calendar: calendar) {
-                return (trimConnectors(words.dropLast(count)), date)
+        for count in stride(from: min(8, words.count - 1), through: 1, by: -1) {
+            if let value = resolve(words.suffix(count).joined(separator: " ")) {
+                return (trimConnectors(words.dropLast(count)), value)
             }
-            if let date = resolve(words.prefix(count).joined(separator: " "), now: now, calendar: calendar) {
-                return (trimConnectors(words.dropFirst(count)), date)
+            if let value = resolve(words.prefix(count).joined(separator: " ")) {
+                return (trimConnectors(words.dropFirst(count)), value)
             }
         }
         return (entry, nil)

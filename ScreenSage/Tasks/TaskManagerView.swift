@@ -2,7 +2,8 @@ import SwiftUI
 
 struct TaskManagerView: View {
     @Bindable var model: AppModel
-    @State private var viewMode = TaskViewMode.list
+    static let initialViewMode = TaskViewMode.list
+    @State private var viewMode = TaskManagerView.initialViewMode
     @State private var filter = TaskAgendaFilter.all
     /// Just-completed rows that stay in place for a moment before moving to Completed.
     @State private var lingering: Set<String> = []
@@ -173,7 +174,7 @@ struct TaskManagerView: View {
                 .foregroundStyle(.secondary)
                 .help("Add task with details")
 
-            TextField("Call mom Friday at 6…", text: $model.taskEntry)
+            TextField(entryPlaceholder, text: $model.taskEntry)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .focused($entryIsFocused)
@@ -204,14 +205,22 @@ struct TaskManagerView: View {
 
     private var destinationMenu: some View {
         @Bindable var sources = sources
-        let list = sources.newTaskReminderList
+        let destination = sources.effectiveDestination
+        let target = sources.destinationTarget
         return Menu {
-            Picker("Save new tasks to", selection: $sources.newTaskReminderListID) {
-                Text("screenie").tag(String?.none)
+            Picker("Save new items to", selection: $sources.newItemDestination) {
+                Text("screenie").tag(NewItemDestination.screenie)
                 if !sources.reminderLists.isEmpty {
                     Section("Reminders") {
                         ForEach(sources.reminderLists) { list in
-                            Text(list.title).tag(Optional(list.id))
+                            Text(list.title).tag(NewItemDestination.reminders(list.id))
+                        }
+                    }
+                }
+                if !sources.writableEventCalendars.isEmpty {
+                    Section("Calendar event") {
+                        ForEach(sources.writableEventCalendars) { calendar in
+                            Text(calendar.title).tag(NewItemDestination.calendar(calendar.id))
                         }
                     }
                 }
@@ -219,18 +228,20 @@ struct TaskManagerView: View {
             .pickerStyle(.inline)
         } label: {
             HStack(spacing: 5) {
-                TaskSourceMark(
-                    kind: list == nil ? .task : .reminder,
-                    tint: list?.color.color ?? .accentColor
-                )
-                Text(list?.title ?? "screenie")
+                TaskSourceMark(kind: destination.markKind, tint: target?.color.color ?? .accentColor)
+                Text(target?.title ?? "screenie")
             }
             .font(.system(size: 11.5))
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
         .foregroundStyle(.secondary)
-        .help("Where new tasks are saved")
+        .help("Where new items are saved")
+    }
+
+    private var entryPlaceholder: String {
+        if case .calendar = sources.effectiveDestination { return "Lunch with Sam tomorrow 12–1…" }
+        return "Call mom Friday at 6…"
     }
 
     private func submitEntry() {
@@ -255,5 +266,15 @@ struct TaskManagerView: View {
 
     private func requestDelete(_ task: ScreenieTask) {
         pendingDeletion = task
+    }
+}
+
+private extension NewItemDestination {
+    var markKind: TaskAgendaKind {
+        switch self {
+        case .screenie: .task
+        case .reminders: .reminder
+        case .calendar: .event
+        }
     }
 }

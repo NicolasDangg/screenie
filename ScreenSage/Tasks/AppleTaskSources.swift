@@ -11,7 +11,9 @@ final class AppleTaskSources {
         static let hiddenReminderLists = "tasks.hiddenReminderLists"
         static let showsEvents = "tasks.showsEvents"
         static let hiddenCalendars = "tasks.hiddenCalendars"
-        static let newTaskReminderList = "tasks.newTaskReminderList"
+        /// Older builds stored only a Reminders list id here; read once to migrate.
+        static let legacyNewTaskReminderList = "tasks.newTaskReminderList"
+        static let newItemDestination = "tasks.newItemDestination"
         static let syncsTasksToCalendar = "tasks.syncsTasksToCalendar"
     }
 
@@ -31,9 +33,9 @@ final class AppleTaskSources {
     private(set) var hiddenCalendarIDs: Set<String> {
         didSet { defaults.set(Array(hiddenCalendarIDs), forKey: Keys.hiddenCalendars) }
     }
-    /// The Reminders list new tasks are saved to; `nil` keeps them as screenie tasks.
-    var newTaskReminderListID: String? {
-        didSet { defaults.set(newTaskReminderListID, forKey: Keys.newTaskReminderList) }
+    /// Where the task panel saves new entries: screenie, a Reminders list, or a calendar as an event.
+    var newItemDestination: NewItemDestination {
+        didSet { defaults.set(newItemDestination.storageValue, forKey: Keys.newItemDestination) }
     }
     var syncsTasksToCalendar: Bool {
         didSet { defaults.set(syncsTasksToCalendar, forKey: Keys.syncsTasksToCalendar) }
@@ -69,7 +71,9 @@ final class AppleTaskSources {
         showsEvents = defaults.object(forKey: Keys.showsEvents) as? Bool ?? true
         hiddenReminderListIDs = Set(defaults.stringArray(forKey: Keys.hiddenReminderLists) ?? [])
         hiddenCalendarIDs = Set(defaults.stringArray(forKey: Keys.hiddenCalendars) ?? [])
-        newTaskReminderListID = defaults.string(forKey: Keys.newTaskReminderList)
+        newItemDestination = defaults.string(forKey: Keys.newItemDestination).flatMap(NewItemDestination.init(storageValue:))
+            ?? defaults.string(forKey: Keys.legacyNewTaskReminderList).map(NewItemDestination.reminders)
+            ?? .screenie
         syncsTasksToCalendar = Self.syncsTasksToCalendar(in: defaults)
         reminderAccess = client == nil ? .denied : .current(for: .reminder)
         eventAccess = client == nil ? .denied : .current(for: .event)
@@ -96,9 +100,26 @@ final class AppleTaskSources {
         reminderAccess == .granted || eventAccess == .granted
     }
 
-    var newTaskReminderList: AppleSourceCalendar? {
-        guard reminderAccess == .granted else { return nil }
-        return reminderLists.first { $0.id == newTaskReminderListID }
+    /// Calendars that can take new events.
+    var writableEventCalendars: [AppleSourceCalendar] {
+        eventCalendars.filter(\.allowsModifications)
+    }
+
+    /// The list or calendar the destination points at, or `nil` when it's screenie or no longer reachable.
+    var destinationTarget: AppleSourceCalendar? {
+        switch newItemDestination {
+        case .screenie:
+            nil
+        case let .reminders(id):
+            reminderAccess == .granted ? reminderLists.first { $0.id == id } : nil
+        case let .calendar(id):
+            eventAccess == .granted ? writableEventCalendars.first { $0.id == id } : nil
+        }
+    }
+
+    /// The destination to actually use: falls back to screenie when the chosen list or calendar is gone.
+    var effectiveDestination: NewItemDestination {
+        destinationTarget == nil ? .screenie : newItemDestination
     }
 
     func isVisible(_ list: AppleSourceCalendar) -> Bool {
@@ -218,9 +239,41 @@ final class AppleTaskSources {
         }
     }
 
+    func addEvent(_ event: ParsedEvent, to calendarID: String) async throws {
+        guard let client else { return }
+        try await client.addEvent(event, calendarID: calendarID)
+        await refresh()
+    }
+
     func addReminder(_ task: ScreenieTask, to listID: String) async throws {
         guard let client else { return }
         try await client.addReminder(title: task.title, dueDate: task.dueDate, notes: task.notes, listID: listID)
         await refresh()
+    }
+}
+
+enum NewItemDestination: Hashable, Sendable {
+    case screenie
+    case reminders(String)
+    case calendar(String)
+
+    init?(storageValue: String) {
+        if storageValue == "screenie" {
+            self = .screenie
+        } else if storageValue.hasPrefix("reminders:") {
+            self = .reminders(String(storageValue.dropFirst("reminders:".count)))
+        } else if storageValue.hasPrefix("calendar:") {
+            self = .calendar(String(storageValue.dropFirst("calendar:".count)))
+        } else {
+            return nil
+        }
+    }
+
+    var storageValue: String {
+        switch self {
+        case .screenie: "screenie"
+        case let .reminders(id): "reminders:\(id)"
+        case let .calendar(id): "calendar:\(id)"
+        }
     }
 }

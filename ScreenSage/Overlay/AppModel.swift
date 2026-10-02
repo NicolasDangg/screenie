@@ -39,6 +39,7 @@ final class AppModel {
     private let mockResponse: String?
     private let mockScheduleResponse: String?
     private let taskParser: @Sendable (String) async throws -> ScreenieTask
+    private let eventParser: @Sendable (String) async throws -> ParsedEvent
     private let taskScheduleCalendarSync: @MainActor (TaskSchedule) async throws -> Void
     private let conversationGracePeriod: TimeInterval
     private var requestTask: Task<Void, Never>?
@@ -62,6 +63,9 @@ final class AppModel {
         taskParser: @escaping @Sendable (String) async throws -> ScreenieTask = {
             try await FoundationModelTaskParser.parse($0)
         },
+        eventParser: @escaping @Sendable (String) async throws -> ParsedEvent = {
+            try await FoundationModelTaskParser.parseEvent($0)
+        },
         conversationGracePeriod: TimeInterval = 60
     ) {
         self.settings = settings
@@ -72,6 +76,7 @@ final class AppModel {
         self.mockScheduleResponse = mockScheduleResponse
         self.taskScheduleCalendarSync = taskScheduleCalendarSync
         self.taskParser = taskParser
+        self.eventParser = eventParser
         self.conversationGracePeriod = conversationGracePeriod
     }
 
@@ -103,6 +108,28 @@ final class AppModel {
         prompt = ""
         presentationMode = .chat
         conversation = Conversation()
+        streamingResponse = ""
+        errorMessage = ""
+        isWorking = false
+        workPhase = nil
+        includeScreenshotForNextMessage = true
+        attachedScreenshot = nil
+        presentationID += 1
+    }
+
+    /// Reopens a saved conversation so it can be continued. Its screenshot isn't stored,
+    /// so the next message captures a fresh one by default.
+    func resume(_ saved: Conversation) {
+        guard saved.id != conversation.id || presentationMode != .chat else { return }
+        requestTask?.cancel()
+        conversationExpiryTask?.cancel()
+        conversationExpiryTask = nil
+        conversationExpiresAt = nil
+        cancelTaskParsing()
+        persistConversationIfNeeded()
+        prompt = ""
+        presentationMode = .chat
+        conversation = saved
         streamingResponse = ""
         errorMessage = ""
         isWorking = false
@@ -405,7 +432,8 @@ final class AppModel {
         return true
     }
 
-    /// Parses a natural-language entry on-device, then saves it where Settings › Tasks says.
+    /// Parses a natural-language entry on-device and saves it to the chosen destination:
+    /// a screenie task, a reminder, or an event in an Apple calendar.
     func addTask(entry rawEntry: String) {
         let entry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !entry.isEmpty else { return }
@@ -416,10 +444,18 @@ final class AppModel {
         isParsingTask = true
         taskParsingTask = Task {
             do {
-                let task = try await taskParser(entry)
-                try Task.checkCancellation()
-                guard taskParsingID == parsingID else { return }
-                try await add(task)
+                await refreshDestinationIfNeeded()
+                if case let .calendar(calendarID) = taskSources.effectiveDestination {
+                    let event = try await eventParser(entry)
+                    try Task.checkCancellation()
+                    guard taskParsingID == parsingID else { return }
+                    try await taskSources.addEvent(event, to: calendarID)
+                } else {
+                    let task = try await taskParser(entry)
+                    try Task.checkCancellation()
+                    guard taskParsingID == parsingID else { return }
+                    try await add(task)
+                }
                 if taskEntry.trimmingCharacters(in: .whitespacesAndNewlines) == entry { taskEntry = "" }
             } catch is CancellationError {
             } catch {
@@ -433,16 +469,26 @@ final class AppModel {
         }
     }
 
-    /// Saves to the chosen Reminders list when one is set and reachable, otherwise as a screenie task.
+    /// Saves a parsed task to the chosen destination. A calendar destination needs a due date and
+    /// becomes a one-hour event.
     func add(_ task: ScreenieTask) async throws {
-        if taskSources.newTaskReminderListID != nil, taskSources.reminderLists.isEmpty {
-            await taskSources.refresh()
-        }
-        if let list = taskSources.newTaskReminderList {
-            try await taskSources.addReminder(task, to: list.id)
-        } else {
+        await refreshDestinationIfNeeded()
+        switch taskSources.effectiveDestination {
+        case .screenie:
             taskStore.add(task)
+        case let .reminders(listID):
+            try await taskSources.addReminder(task, to: listID)
+        case let .calendar(calendarID):
+            guard let start = task.dueDate else { throw TaskEntryParserError.missingEventTime }
+            let timing = EventTiming(start: start, end: start.addingTimeInterval(TaskDateResolver.defaultEventDuration), isAllDay: false)
+            try await taskSources.addEvent(ParsedEvent(title: task.title, timing: timing, notes: task.notes), to: calendarID)
         }
+    }
+
+    /// Lists load lazily, so make sure the chosen destination can be found before falling back to screenie.
+    private func refreshDestinationIfNeeded() async {
+        guard taskSources.newItemDestination != .screenie, taskSources.destinationTarget == nil else { return }
+        await taskSources.refresh()
     }
 
     func toggleCompletion(of item: TaskAgendaItem) {

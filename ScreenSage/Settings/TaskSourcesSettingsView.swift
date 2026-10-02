@@ -53,17 +53,24 @@ struct TaskSourcesSettingsView: View {
                 Text("Apple Calendar")
             }
 
-            Section("New Tasks") {
-                Picker("Save to", selection: $sources.newTaskReminderListID) {
-                    Text("screenie").tag(String?.none)
+            Section {
+                Picker("Save new items to", selection: $sources.newItemDestination) {
+                    Text("screenie task").tag(NewItemDestination.screenie)
                     ForEach(sources.reminderLists) { list in
-                        Text("Reminders — \(list.title)").tag(Optional(list.id))
+                        Text("Reminder — \(list.title)").tag(NewItemDestination.reminders(list.id))
+                    }
+                    ForEach(sources.writableEventCalendars) { calendar in
+                        Text("Event — \(calendar.title)").tag(NewItemDestination.calendar(calendar.id))
                     }
                 }
                 Toggle(isOn: $sources.syncsTasksToCalendar) {
                     Text("Add dated screenie tasks to Calendar")
                     Text("Uses your default calendar.")
                 }
+            } header: {
+                Text("New Items")
+            } footer: {
+                Text("Events are saved straight to Apple Calendar. Type when it happens, like “Lunch with Sam tomorrow 12–1”.")
             }
         }
         .formStyle(.grouped)

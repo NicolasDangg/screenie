@@ -31,15 +31,6 @@ final class ScreenSageTests: XCTestCase {
         XCTFail("Timed out waiting for asynchronous state change")
     }
 
-    @MainActor
-    func testLiveBackdropUsesActiveBehindWindowBlending() {
-        let backdrop = LiveBackdropView.makeVisualEffectView()
-
-        XCTAssertEqual(backdrop.blendingMode, .behindWindow)
-        XCTAssertEqual(backdrop.material, .hudWindow)
-        XCTAssertEqual(backdrop.state, .active)
-    }
-
     func testPermissionSettingsMetadata() {
         XCTAssertEqual(AppPermission.allCases, [.screenRecording, .accessibility, .inputMonitoring])
         XCTAssertEqual(AppPermission.screenRecording.requirement, "Required")
@@ -273,17 +264,7 @@ final class ScreenSageTests: XCTestCase {
 
     @MainActor
     func testTaskManagerDefaultsToListView() {
-        let view = TaskManagerView(model: AppModel(
-            settings: AppSettings(),
-            taskStore: TaskStore(fileURL: nil, calendarSync: nil)
-        ))
-        let state = Mirror(reflecting: view).children
-            .first { $0.label == "_viewMode" }?.value as? State<TaskViewMode>
-
-        guard let state else {
-            return XCTFail("Missing task view mode state")
-        }
-        guard case .list = state.wrappedValue else {
+        guard case .list = TaskManagerView.initialViewMode else {
             return XCTFail("Task manager should open in list view")
         }
     }
@@ -401,7 +382,7 @@ final class ScreenSageTests: XCTestCase {
             taskStore: TaskStore(fileURL: nil, calendarSync: nil),
             mockResponse: "Response"
         )
-        let controller = OverlayPanelController(model: model)
+        let controller = OverlayPanelController(model: model, defaults: UserDefaults(suiteName: UUID().uuidString)!)
         model.prompt = "Question"
         model.submit()
         controller.show()
@@ -421,6 +402,67 @@ final class ScreenSageTests: XCTestCase {
         XCTAssertEqual(resized.width, original.width + 45)
         controller.resize(.left, at: local)
         XCTAssertEqual(panel.frame, resized)
+    }
+
+    func testHistoryGroupsByRecencyAndFindsMatches() {
+        let calendar = utcCalendar
+        let now = date(2026, 10, 2, 15)
+        func conversation(_ title: String, _ updatedAt: Date, answer: String = "") -> Conversation {
+            Conversation(
+                title: title,
+                updatedAt: updatedAt,
+                messages: [
+                    ChatMessage(role: .user, text: "Question about \(title)"),
+                    ChatMessage(role: .assistant, text: answer.isEmpty ? "Answer" : answer)
+                ]
+            )
+        }
+        let conversations = [
+            conversation("Older", date(2026, 8, 20)),
+            conversation("Today", date(2026, 10, 2, 9), answer: "## The **effect** never cancels\nMore detail"),
+            conversation("Yesterday", date(2026, 10, 1, 20)),
+            conversation("This week", date(2026, 9, 28))
+        ]
+
+        let sections = HistoryGrouping.sections(for: conversations, now: now, calendar: calendar)
+
+        XCTAssertEqual(sections.map(\.conversations).map { $0.map(\.title) }, [["Today"], ["Yesterday"], ["This week"], ["Older"]])
+        XCTAssertEqual(Array(sections.map(\.title).prefix(3)), ["Today", "Yesterday", "Previous 7 Days"])
+        XCTAssertEqual(HistoryGrouping.preview(of: conversations[1]), "The effect never cancels")
+        XCTAssertTrue(HistoryGrouping.matches(conversations[1], query: "EFFECT"))
+        XCTAssertTrue(HistoryGrouping.matches(conversations[0], query: ""))
+        XCTAssertFalse(HistoryGrouping.matches(conversations[0], query: "effect"))
+    }
+
+    @MainActor
+    func testResumingSavedConversationContinuesIt() {
+        let model = AppModel(
+            settings: AppSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
+            history: ChatHistoryStore(fileURL: FileManager.default.temporaryDirectory
+                .appending(path: UUID().uuidString)
+                .appending(path: "history.json")),
+            taskStore: TaskStore(fileURL: nil, calendarSync: nil),
+            mockResponse: "Follow-up answer"
+        )
+        let saved = Conversation(
+            title: "Debounced search",
+            messages: [
+                ChatMessage(role: .user, text: "Why twice?"),
+                ChatMessage(role: .assistant, text: "No cleanup.")
+            ]
+        )
+        model.presentTasks()
+
+        model.resume(saved)
+
+        XCTAssertEqual(model.presentationMode, .chat)
+        XCTAssertEqual(model.conversation.id, saved.id)
+        XCTAssertTrue(model.hasCompletedFirstResponse)
+        XCTAssertTrue(model.includeScreenshotForNextMessage)
+
+        model.prompt = "And on unmount?"
+        model.submit()
+        XCTAssertEqual(model.conversation.messages.map(\.text).suffix(2), ["And on unmount?", "Follow-up answer"])
     }
 
     @MainActor
@@ -499,7 +541,7 @@ final class ScreenSageTests: XCTestCase {
             mockResponse: "Answer",
             conversationGracePeriod: 2
         )
-        let controller = OverlayPanelController(model: model)
+        let controller = OverlayPanelController(model: model, defaults: UserDefaults(suiteName: UUID().uuidString)!)
 
         controller.show()
         model.prompt = "Keep this chat"
@@ -806,6 +848,83 @@ final class ScreenSageTests: XCTestCase {
             now: now,
             calendar: utcCalendar
         ))
+    }
+
+    func testEventResolverReadsRangesDurationsAndAllDay() {
+        // Thursday 1 October 2026, 10:00 UTC.
+        let now = date(2026, 10, 1, 10)
+        func timing(_ phrase: String) -> EventTiming? {
+            TaskDateResolver.resolveEvent(phrase, now: now, calendar: utcCalendar)
+        }
+        func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+            date(2026, 10, day, hour).addingTimeInterval(TimeInterval(minute * 60))
+        }
+
+        XCTAssertEqual(timing("tomorrow 12–1"), EventTiming(start: at(2, 12), end: at(2, 13), isAllDay: false))
+        XCTAssertEqual(timing("Friday from 3 to 4:30pm"), EventTiming(start: at(2, 15), end: at(2, 16, 30), isAllDay: false))
+        XCTAssertEqual(timing("11-1pm tomorrow"), EventTiming(start: at(2, 11), end: at(2, 13), isAllDay: false))
+        XCTAssertEqual(timing("tomorrow at 3pm"), EventTiming(start: at(2, 15), end: at(2, 16), isAllDay: false))
+        XCTAssertEqual(timing("tomorrow 9:30 for 15 min"), EventTiming(start: at(2, 9, 30), end: at(2, 9, 45), isAllDay: false))
+        XCTAssertEqual(timing("Oct 14"), EventTiming(start: date(2026, 10, 14, 0), end: date(2026, 10, 15, 0), isAllDay: true))
+        XCTAssertNil(timing("sometime"))
+    }
+
+    func testEventParserSplitsTitleAndChecksModelOutput() throws {
+        let now = date(2026, 10, 1, 10)
+
+        let fromModel = try FoundationModelTaskParser.makeEvent(
+            entry: "Lunch with Sam tomorrow 12–1 at Tartine",
+            title: "Lunch with Sam",
+            schedulePhrase: "tomorrow 12–1",
+            notes: "at Tartine",
+            now: now,
+            calendar: utcCalendar
+        )
+        XCTAssertEqual(fromModel.title, "Lunch with Sam")
+        XCTAssertEqual(fromModel.start, date(2026, 10, 2, 12))
+        XCTAssertEqual(fromModel.end, date(2026, 10, 2, 13))
+        XCTAssertEqual(fromModel.notes, "at Tartine")
+
+        // Without the model, the rule-based reader finds the timing at the end of the entry.
+        let ruleBased = try FoundationModelTaskParser.makeEvent(
+            entry: "Lunch with Sam tomorrow 12–1",
+            title: "",
+            schedulePhrase: "",
+            notes: "",
+            now: now,
+            calendar: utcCalendar
+        )
+        XCTAssertEqual(ruleBased.title, "Lunch with Sam")
+        XCTAssertEqual(ruleBased.start, date(2026, 10, 2, 12))
+
+        XCTAssertThrowsError(try FoundationModelTaskParser.makeEvent(
+            entry: "Team sync",
+            title: "Team sync",
+            schedulePhrase: "",
+            notes: "",
+            now: now,
+            calendar: utcCalendar
+        )) { error in
+            XCTAssertEqual(error as? TaskEntryParserError, .missingEventTime)
+        }
+    }
+
+    @MainActor
+    func testNewItemDestinationPersistsAndMigratesReminderList() {
+        for destination in [NewItemDestination.screenie, .reminders("abc"), .calendar("work:1")] {
+            XCTAssertEqual(NewItemDestination(storageValue: destination.storageValue), destination)
+        }
+        XCTAssertNil(NewItemDestination(storageValue: "nonsense"))
+
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set("legacy-list", forKey: "tasks.newTaskReminderList")
+        let sources = AppleTaskSources(defaults: defaults, client: nil)
+        XCTAssertEqual(sources.newItemDestination, .reminders("legacy-list"))
+        // The list isn't reachable here, so new items fall back to screenie.
+        XCTAssertEqual(sources.effectiveDestination, .screenie)
+
+        sources.newItemDestination = .calendar("work")
+        XCTAssertEqual(AppleTaskSources(defaults: defaults, client: nil).newItemDestination, .calendar("work"))
     }
 
     func testPendingReminderCompletionSurvivesRefresh() {

@@ -194,13 +194,32 @@ struct TaskCalendarView: View {
     }
 
     private func stepButton(_ title: String, systemImage: String, weeks: Int) -> some View {
-        Button(title, systemImage: systemImage) {
+        WeekStepButton(title: title, systemImage: systemImage) {
             selectedDay = calendar.date(byAdding: .weekOfYear, value: weeks, to: selectedDay) ?? selectedDay
         }
-        .labelStyle(.iconOnly)
+    }
+}
+
+/// A full-height arrow beside the week strip. The frame and hit shape sit inside the label,
+/// because a plain button only responds where its label draws.
+private struct WeekStepButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isHovered ? .primary : .secondary)
+                .frame(width: 30, height: 60)
+                .background(.primary.opacity(isHovered ? 0.08 : 0), in: .rect(cornerRadius: 10))
+                .contentShape(.rect(cornerRadius: 10))
+        }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .frame(width: 20, height: 60)
-        .contentShape(.rect)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(title)
+        .help(title)
     }
 }
